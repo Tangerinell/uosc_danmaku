@@ -979,7 +979,7 @@ tmdb_api_key
 想要使用此选项，请在mpv配置文件夹下的 `script-opts`中创建 `uosc_danmaku.conf`文件并自定义如下内容：
 
 ```
-tmdb_api_key=BASE64_ENCODED_TMDB_API_KEY
+tmdb_api_key=NmJmYjIxOTZkNzIyN2UyMTIzMGM3Y2YzZjQ4MDNkZGM=
 ```
 
 </details>
