@@ -1,5 +1,7 @@
 # uosc_danmaku
 
+本项目 Fork 自 [Tony15246/uosc_danmaku](https://github.com/Tony15246/uosc_danmaku)，并经由 AI 修改。
+
 在MPV播放器中加载弹弹play弹幕，基于 uosc UI框架和弹弹play API的mpv弹幕扩展插件
 
 > [!WARNING]
