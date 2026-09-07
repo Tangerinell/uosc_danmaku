@@ -640,9 +640,6 @@ mp.register_script_message("get-extra-event", function(cat, id, playlink, source
     if not is_auto then
         AUTO_MATCHING = false
     end
-    if uosc_available then
-        mp.commandv("script-message-to", "uosc", "close-menu", "menu_anime")
-    end
     if cat == "电影" then
         if playlink:match("^.-%.html") then
             playlink = playlink:match("^(.-%.html).*")
@@ -654,6 +651,9 @@ mp.register_script_message("get-extra-event", function(cat, id, playlink, source
         DANMAKU.source = source_id
         write_history()
         add_danmaku_source(playlink, true)
+        if not is_auto then
+            show_manual_source_added_menu("menu_anime", DANMAKU.anime, DANMAKU.episode)
+        end
     else
         local episode_num = auto_episode_num and auto_episode_num ~= "" and auto_episode_num or nil
         get_details(cat, id, source_id, title, year, nil, episode_num, is_auto)
@@ -661,9 +661,10 @@ mp.register_script_message("get-extra-event", function(cat, id, playlink, source
 end)
 
 mp.register_script_message("add-extra-event", function(url, episode, number, class, id, site, title, year)
+    local is_auto = AUTO_MATCHING == true
     AUTO_MATCHING = false
-    if uosc_available then
-        mp.commandv("script-message-to", "uosc", "close-menu", "menu_details")
-    end
     load_extra_danmaku(url, episode, number, class, id, site, title, year)
+    if not is_auto then
+        show_manual_source_added_menu("menu_details", title, "第" .. tostring(episode) .. "集")
+    end
 end)

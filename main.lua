@@ -804,6 +804,7 @@ end
 
 -- 加载弹幕
 function load_danmaku(from_menu, no_osd, manual_refresh)
+    local manual_load = from_menu and not AUTO_MATCHING
     convert_danmaku_to_ass_events()
     if AUTO_MATCHING and not manual_refresh and type(COMMENTS) == "table" then
         AUTO_MATCHING_STAGE = #COMMENTS > 0 and "ready" or "failed"
@@ -814,6 +815,16 @@ function load_danmaku(from_menu, no_osd, manual_refresh)
         mp.commandv("script-message", "auto_load_fallback")
     end
     render_danmaku(from_menu, no_osd, manual_refresh)
+
+    -- 多个手动源并行加载时，先让当前源的“已准备好”提示完整显示；
+    -- 提示结束后若仍有其他异步请求，再恢复“弹幕加载中...”状态。
+    if manual_load and not no_osd and type(is_async_running) == "function" and is_async_running() then
+        mp.add_timeout(3.05, function()
+            if not AUTO_MATCHING and is_async_running() then
+                show_message("弹幕加载中...", 30)
+            end
+        end)
+    end
 end
 
 function load_danmaku_for_url(path)

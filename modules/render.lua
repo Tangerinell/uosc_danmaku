@@ -169,7 +169,7 @@ end
 function render_danmaku(from_menu, no_osd, manual_refresh)
     -- 自动匹配得到的结果不因内部 from_menu 标记而强制显示；显示状态由开关控制。
     -- 手动菜单操作仍可在关闭持久化开关时主动显示结果。
-    local manual_display = from_menu and not AUTO_MATCHING
+    local manual_display = from_menu and not AUTO_MATCHING and danmaku_is_visible()
     local blocked_only = AUTO_MATCHING and not manual_refresh and
         type(all_danmaku_sources_blocked) == "function" and all_danmaku_sources_blocked()
     if blocked_only and type(COMMENTS) == "table" and #COMMENTS == 0 then
@@ -181,7 +181,7 @@ function render_danmaku(from_menu, no_osd, manual_refresh)
     local auto_refresh = AUTO_MATCHING and not manual_refresh and not blocked_only
     local hidden_auto_match = auto_refresh and not danmaku_is_visible()
     local empty_auto_match = auto_refresh and type(COMMENTS) == "table" and #COMMENTS == 0
-    local hidden_loaded = not danmaku_is_visible() and not manual_display and
+    local hidden_loaded = not danmaku_is_visible() and
         type(COMMENTS) == "table" and #COMMENTS > 0
     if empty_auto_match then
         -- 自动流程即使把空响应转换成了空事件表，也不能显示成“加载成功 0 条”；

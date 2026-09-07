@@ -537,7 +537,7 @@ function get_episodes(animeTitle, bangumiId, api_server)
                 hint = episode.episodeNumber,
                 value = { "script-message-to", mp.get_script_name(), "load-danmaku",
                 animeTitle, episode.episodeTitle, episode.episodeId, api_server },
-                keep_open = false,
+                keep_open = true,
                 selectable = true,
             })
         end
@@ -591,13 +591,24 @@ function update_menu_uosc(menu_type, menu_title, menu_item, menu_footnote, menu_
     local menu_props = {
         type = menu_type,
         title = menu_title,
-        search_style = menu_cmd and "palette" or "on_demand",
+        -- 剧集选择页需要在添加弹幕后继续显示二级状态页；返回按钮会用
+        -- open-menu 主动替换当前菜单，因此菜单级保持打开不会阻止返回。
+        keep_open = menu_type == "menu_episodes" or menu_type == "menu_source_added",
+        search_style = menu_type == "menu_source_added" and "disabled" or
+            (menu_cmd and "palette" or "on_demand"),
         search_debounce = menu_cmd and "submit" or 0,
         on_search = menu_cmd,
         footnote = menu_footnote,
         search_suggestion = query,
         items = items,
     }
+
+    -- UOSC 的默认菜单回调会在执行条目命令后关闭菜单。剧集选择页需要
+    -- 执行命令后继续显示状态页，因此由脚本接管该菜单的 activate 事件。
+    if menu_type == "menu_anime" or menu_type == "menu_episodes" or
+        menu_type == "menu_details" or menu_type == "menu_source_added" then
+        menu_props.callback = { mp.get_script_name(), "episode-menu-event" }
+    end
 
     if on_close ~= nil then
         menu_props.on_close = on_close
@@ -613,6 +624,45 @@ function update_menu_uosc(menu_type, menu_title, menu_item, menu_footnote, menu_
     mp.commandv("script-message-to", "uosc", cmd, json_props)
 
     return json_props
+end
+
+mp.register_script_message("episode-menu-event", function(event_json)
+    local event = utils.parse_json(event_json or "")
+    if type(event) ~= "table" or event.type ~= "activate" then return end
+    local value = event.value
+    if type(value) == "table" then
+        mp.commandv(unpack(value))
+    elseif type(value) == "string" and value ~= "" then
+        mp.command(value)
+    end
+end)
+
+function show_manual_source_added_menu(_, anime_title, episode_title)
+    if not uosc_available then return end
+    update_menu_uosc("menu_source_added", "弹幕源添加成功", {
+        {
+            title = "已选择：" .. tostring(anime_title or ""),
+            hint = tostring(episode_title or ""),
+            value = "",
+            italic = true,
+            selectable = false,
+            align = "center",
+        },
+        {
+            title = "弹幕源添加成功",
+            value = "",
+            italic = true,
+            selectable = false,
+            keep_open = true,
+            align = "center",
+        },
+        {
+            title = "↩️ 返回搜索结果",
+            value = { "script-message-to", mp.get_script_name(), "open-latest-menu-anime" },
+            keep_open = true,
+            selectable = true,
+        },
+    }, "已添加弹幕源")
 end
 
 function open_menu_select(menu_items, is_time)
@@ -1671,19 +1721,19 @@ end)
 mp.register_script_message("search-episodes-event", function(animeTitle, bangumiId, api_server)
     AUTO_MATCHING = false
     perform_cancel_active_request()
-    if uosc_available then
-        mp.commandv("script-message-to", "uosc", "close-menu", "menu_anime")
-    end
-
     get_episodes(animeTitle, bangumiId, api_server)
 end)
 
 mp.register_script_message("load-danmaku", function(animeTitle, episodeTitle, episodeId, api_server)
+    local is_auto = AUTO_MATCHING == true
     AUTO_MATCHING = false
     ENABLED = true
     DANMAKU.anime = animeTitle
     DANMAKU.episode = episodeTitle
     set_episode_id(episodeId, true, api_server)
+    if not is_auto then
+        show_manual_source_added_menu("menu_episodes", animeTitle, episodeTitle)
+    end
 end)
 
 mp.register_script_message("add-source-event", function(query)
