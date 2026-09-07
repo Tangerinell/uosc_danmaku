@@ -9,6 +9,27 @@ local active_request_cancel = nil
 local active_request_type = nil
 local request_cancelled = false
 local search_generation = 0
+local manual_search_cache = nil
+local manual_search_cache_path = nil
+
+local function current_manual_search_cache_path()
+    return mp.get_property("path") or ""
+end
+
+local function clear_manual_search_cache()
+    manual_search_cache = nil
+    manual_search_cache_path = nil
+    latest_menu_anime = {}
+end
+
+local function get_manual_search_cache()
+    if not manual_search_cache or manual_search_cache_path ~= current_manual_search_cache_path() then
+        return nil
+    end
+    return manual_search_cache
+end
+
+mp.register_event("file-loaded", clear_manual_search_cache)
 
 -- 如果 latest_menu_anime 中存在首项为加载占位，移除它（兼容完整 menu props 或 items 数组）
 local function strip_loading_from_latest_menu_anime()
@@ -402,7 +423,7 @@ end
 
 -- 缓存搜索结果菜单，供剧集详情页的“返回搜索结果”恢复使用。
 -- 自动后台搜索只调用此函数，不会打开或更新当前 UI。
-function cache_anime_search_results(query, items)
+function cache_anime_search_results(query, items, remember_manual)
     local result_items = items or {}
     if #result_items == 0 then
         result_items = {
@@ -429,11 +450,15 @@ function cache_anime_search_results(query, items)
     else
         latest_menu_anime = utils.format_json(result_items)
     end
+    if remember_manual then
+        manual_search_cache = latest_menu_anime
+        manual_search_cache_path = current_manual_search_cache_path()
+    end
     return result_items
 end
 
 local function show_anime_search_results(query, items)
-    local result_items = cache_anime_search_results(query, items)
+    local result_items = cache_anime_search_results(query, items, true)
     local menu_cmd = { "script-message-to", mp.get_script_name(), "search-anime-event" }
     if uosc_available then
         latest_menu_anime = update_menu_uosc(
@@ -444,8 +469,14 @@ local function show_anime_search_results(query, items)
             menu_cmd,
             query
         )
+        if manual_search_cache and manual_search_cache_path == current_manual_search_cache_path() then
+            manual_search_cache = latest_menu_anime
+        end
     elseif input_loaded then
         latest_menu_anime = utils.format_json(result_items)
+        if manual_search_cache and manual_search_cache_path == current_manual_search_cache_path() then
+            manual_search_cache = latest_menu_anime
+        end
         show_message("", 0)
         input.terminate()
         mp.add_timeout(0.1, function()
@@ -555,6 +586,9 @@ function get_episodes(animeTitle, bangumiId, api_server)
                     end
                 end
                 latest_menu_anime = utils.format_json(menu_table)
+                if manual_search_cache and manual_search_cache_path == current_manual_search_cache_path() then
+                    manual_search_cache = latest_menu_anime
+                end
             end
         end
 
@@ -739,6 +773,12 @@ function open_input_menu_get()
 end
 
 function open_input_menu_uosc()
+    local cached_results = get_manual_search_cache()
+    if cached_results then
+        mp.commandv("script-message-to", "uosc", "open-menu", cached_results)
+        return
+    end
+
     local items = {}
     local search_title = get_manual_search_default()
 
@@ -772,6 +812,15 @@ function open_input_menu()
     if uosc_available then
         open_input_menu_uosc()
     elseif input_loaded then
+        local cached_results = get_manual_search_cache()
+        if cached_results then
+            local cached_items = utils.parse_json(cached_results)
+            if cached_items and cached_items.items then cached_items = cached_items.items end
+            if type(cached_items) == "table" then
+                open_menu_select(cached_items)
+                return
+            end
+        end
         mp.add_timeout(0.01, function()
             open_input_menu_get()
         end)
@@ -1676,6 +1725,7 @@ end)
 
 -- 注册函数给 uosc 按钮使用
 mp.register_script_message("search-anime-event", function(query)
+    clear_manual_search_cache()
     perform_cancel_active_request()
     local filter_note = nil
     local search_name = query
