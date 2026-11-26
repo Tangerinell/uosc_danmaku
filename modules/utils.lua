@@ -1,3 +1,4 @@
+local msg = require('mp.msg')
 local utils = require("mp.utils")
 local unpack = unpack or table.unpack
 
@@ -294,6 +295,26 @@ function split(str, delim)
     return result
 end
 
+-- 按行拆分文本：保留空行与“末行无换行符”结构，兼容 \n 与 \r\n
+function split_lines(content)
+    content = tostring(content or "")
+    local lines, pos = {}, 1
+    while pos <= #content do
+        local nl = content:find("[\r\n]", pos)
+        if not nl then
+            lines[#lines + 1] = content:sub(pos)
+            break
+        end
+        lines[#lines + 1] = content:sub(pos, nl - 1)
+        local next_pos = nl + 1
+        if content:sub(nl, nl) == "\r" and content:sub(next_pos, next_pos) == "\n" then
+            next_pos = next_pos + 1
+        end
+        pos = next_pos
+    end
+    return lines
+end
+
 function table_to_zero_indexed(tbl)
     for i = #tbl, 1, -1 do
         tbl[i - 1] = tbl[i]
@@ -496,30 +517,118 @@ end
 
 -- 应用额外的自定义标题替换规则
 function title_replace(title)
-    local title_replace = utils.parse_json(options.title_replace)
-    if not title_replace then
+    if not title then return title end
+    local content = options.title_replace
+    if content == nil or content == "" then
         return title
     end
-    for _, v in pairs(title_replace) do
-        for _, indexrules in pairs(v['rules']) do
-            for rule, override in pairs(indexrules) do
-                title = title:gsub(rule, override)
-                        :gsub("[_%.]", " ")
-                        :gsub("^%s*(.-)%s*$", "%1")
-                        :gsub("[@#%.%+%-%%&*_=,/~`]+$", "")
+    content = content:gsub("^%s*(.-)%s*$", "%1")
+
+    if content:sub(1, 1) ~= "[" and content:sub(1, 1) ~= "{" then
+        -- JSON 规则文件路径：每次解析标题时现场读取，修改规则文件后无需重启 mpv
+        local path = mp.command_native({ "expand-path", content })
+        local file_content = read_file(path)
+        if not file_content then
+            msg.warn(("title_replace 规则文件不存在：%s"):format(path))
+            return title
+        end
+        content = file_content
+    end
+
+    local title_replace_rules = utils.parse_json(content)
+    if not title_replace_rules then
+        msg.warn("title_replace JSON 解析失败，已忽略标题替换规则")
+        return title
+    end
+    local parsed = title_replace_rules
+    -- 兼容顶层为 { "rules": [...] } 的简化写法
+    if type(parsed) == "table" and parsed.rules ~= nil and #parsed == 0 then
+        parsed = { parsed }
+    end
+    if type(parsed) ~= "table" or #parsed == 0 then
+        return title
+    end
+    for _, v in pairs(parsed) do
+        -- 容错：规则项不是表或缺 rules 键时跳过，避免 pairs(nil) 抛错
+        if type(v) == "table" and type(v["rules"]) == "table" then
+            for _, indexrules in pairs(v['rules']) do
+                for rule, override in pairs(indexrules) do
+                    title = title:gsub(rule, override)
+                            :gsub("[_%.]", " ")
+                            :gsub("^%s*(.-)%s*$", "%1")
+                            :gsub("[@#%.%+%-%%&*_=,/~`]+$", "")
+                end
             end
         end
     end
     return title
 end
 
+-- 写history
 function write_json_file(file_path, data)
-    local file = io.open(file_path, "w")
-    if not file then
-        return
+    return write_file(file_path, utils.format_json(data)) -- 将 Lua 表转换为 JSON 并写入
+end
+
+-- 跨平台创建目录（含多级），已确认存在的目录会缓存，避免重复 stat/ 子进程
+local ensured_directories = {}
+function ensure_directory(directory)
+    if type(directory) ~= "string" or directory == "" then return false end
+    local key = directory:gsub("\\", "/"):gsub("/+$", "")
+    if key == "" or key:match("^%a:$") then return false end
+    if ensured_directories[key] then return true end
+
+    local info = utils.file_info(directory)
+    if info and info.is_dir then
+        ensured_directories[key] = true
+        return true
     end
-    file:write(utils.format_json(data)) -- 将 Lua 表转换为 JSON 并写入
+
+    local args
+    if PLATFORM == "windows" then
+        local escaped = tostring(directory):gsub("'", "''")
+        local command = "[System.IO.Directory]::CreateDirectory('" .. escaped .. "') | Out-Null"
+        args = { "powershell", "-NoProfile", "-NonInteractive", "-Command", command }
+    else
+        args = { "mkdir", "-p", directory }
+    end
+
+    mp.command_native({
+        name = "subprocess",
+        args = args,
+        capture_stdout = true,
+        capture_stderr = true,
+        playback_only = false,
+    })
+
+    info = utils.file_info(directory)
+    if info and info.is_dir then
+        ensured_directories[key] = true
+        return true
+    end
+    return false
+end
+
+-- 取文件所在目录（不做路径规范化，仅用于建目录前判断）
+local function parent_of(file_path)
+    local dir = tostring(file_path):match("^(.*)[/\\][^/\\]*$")
+    return dir
+end
+
+-- 通用写文件原语（历史记录、搜索历史、黑名单等共用）
+-- 目录不存在时自动创建，避免写入静默失败
+function write_file(file_path, content)
+    if type(file_path) ~= "string" or file_path == "" or content == nil then
+        return false
+    end
+    local dir = parent_of(file_path)
+    if dir and dir ~= "" and not dir:match("^%a:$") then
+        ensure_directory(dir)
+    end
+    local file = io.open(file_path, "wb")
+    if not file then return false end
+    file:write(content)
     file:close()
+    return true
 end
 
 -- 拆分字符串中的字符和数字
@@ -1220,4 +1329,106 @@ function parallel_requests(servers, build_args_fn, per_response_cb, final_cb, op
         end
         cancel_fn()
     end
+end
+
+
+-- ============== 弹幕搜索历史（合入上游 #417/#418） ==============
+
+local search_history_records = nil
+
+function get_search_history_path()
+    local path = options.search_history_path
+    if path == nil or path == "" then return nil end
+    return mp.command_native({"expand-path", path})
+end
+
+function load_search_history()
+    if search_history_records ~= nil then
+        return search_history_records
+    end
+
+    search_history_records = {}
+    local path = get_search_history_path()
+    if path == nil then return search_history_records end
+
+    local content = read_file(path)
+    if content == nil then return search_history_records end
+
+    local data = utils.parse_json(content)
+    if type(data) ~= "table" then
+        msg.warn("搜索历史文件解析失败，已忽略: " .. path)
+        return search_history_records
+    end
+
+    for _, item in ipairs(data) do
+        if type(item) == "table" and type(item.keyword) == "string" and item.keyword ~= "" then
+            table.insert(search_history_records, {
+                keyword = item.keyword,
+                time = tonumber(item.time) or 0,
+            })
+        end
+    end
+
+    return search_history_records
+end
+
+function save_search_history()
+    local path = get_search_history_path()
+    if path then
+        write_json_file(path, search_history_records)
+    end
+end
+
+function record_search_history(query)
+    local path = get_search_history_path()
+    if path == nil or type(query) ~= "string" then return end
+
+    query = query:gsub("^%s*(.-)%s*$", "%1")
+    if query == "" then return end
+
+    local records = load_search_history()
+
+    -- 去重：已存在的记录先移除，新记录插入头部置顶
+    for i, item in ipairs(records) do
+        if item.keyword == query then
+            table.remove(records, i)
+            break
+        end
+    end
+    table.insert(records, 1, { keyword = query, time = os.time() })
+
+    -- 超过上限时从尾部丢弃，小于 1 表示不限制
+    local size = tonumber(options.search_history_size) or 15
+    if size >= 1 then
+        while #records > size do
+            table.remove(records)
+        end
+    end
+
+    save_search_history()
+end
+
+-- 删除单条搜索历史（按关键词精确匹配），供 uosc 搜索菜单的条目操作调用
+function remove_search_history(keyword)
+    if type(keyword) ~= "string" or keyword == "" then return false end
+
+    local records = load_search_history()
+    for i, item in ipairs(records) do
+        if item.keyword == keyword then
+            table.remove(records, i)
+            save_search_history()
+            return true
+        end
+    end
+
+    return false
+end
+
+function get_search_history()
+    return load_search_history()
+end
+
+function clear_search_history()
+    search_history_records = {}
+    save_search_history()
 end

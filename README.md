@@ -1,11 +1,19 @@
 # uosc_danmaku
 
+> 当前分叉版本：`2.2.0.2`（合入上游截至 2026-11-25 的功能）；合并日期：2026-11-26
+>
+> 上游基线：`Tony15246/uosc_danmaku` @ `74ade6c`。本次合并内容：搜索历史、屏蔽词菜单、`title_replace` 规则文件、搜索完成统计行、网络流历史加载顺序优化、`message_alignment` 选项拼写修正。
+>
+> 本 fork 仓库：https://github.com/Tangerinell/uosc_danmaku （暂无 releases，请直接克隆仓库或下载仓库 zip）
+>
+> 已移除内置的脚本自动更新/检查更新功能（`check-update`），避免被上游发行版覆盖本 fork 的修改。更新方式请手动拉取本仓库。
+
 本项目 Fork 自 [Tony15246/uosc_danmaku](https://github.com/Tony15246/uosc_danmaku)，并经由 AI 修改。
 
 在MPV播放器中加载弹弹play弹幕，基于 uosc UI框架和弹弹play API的mpv弹幕扩展插件
 
 > [!WARNING]
-> Release1.2.0及Release1.2.0之前的发行版，都由于弹弹play接口使用政策改版，部分功能无法使用。如果发现插件功能异常，比如搜索弹幕总是显示无结果，请拉取或下载主分支最新源代码；或下载[最新发行版](https://github.com/Tony15246/uosc_danmaku/releases/latest)
+> Release1.2.0及Release1.2.0之前的发行版，都由于弹弹play接口使用政策改版，部分功能无法使用。如果发现插件功能异常，比如搜索弹幕总是显示无结果，请拉取本仓库主分支的最新源代码
 
 > [!NOTE]
 > 插件默认通过项目维护的 API 代理 `https://danmaku-api.152468.xyz` 访问弹弹play开放弹幕网络。普通用户无需注册账号，也无需配置或持有弹弹play的 AppId/AppSecret。代理包含缓存和访问频率限制，请勿用于批量抓取。
@@ -22,7 +30,7 @@
 <video width="902" src="https://github.com/user-attachments/assets/86717e75-9176-4f1a-88cd-71fa94da0c0e">
 </video>
 
-在未安装uosc框架时，调用mpv内部的 `mp.input`进行菜单渲染，具体效果见[此pr](https://github.com/Tony15246/uosc_danmaku/pull/24)
+在未安装uosc框架时，调用mpv内部的 `mp.input`进行菜单渲染
 
 ### 主要功能
 
@@ -60,7 +68,11 @@
 
 15. 弹幕简体字繁体字转换，解决弹幕简繁混杂问题（具体设置方法详见[chConvert配置项说明](#chConvert)）
 
-16. 自定义插件相关提示的显示位置，可以自由调节距离画面左上角的两个维度的距离（具体设置方法详见[message_x配置项说明](#message_x)和[message_y配置项说明](#message_y)）
+16. 自定义插件相关提示的显示位置与对齐方式，可以自由调节距离画面左上角的两个维度的距离（具体设置方法详见[message_x配置项说明](#message_x)、[message_y配置项说明](#message_y)和[message_alignment配置项说明](#message_alignment)）
+
+17. 弹幕搜索历史：自动记录搜索关键词，在搜索菜单中直接点选重新搜索，支持删除单条记录（具体设置方法详见[search_history_path配置项说明](#search_history_path)）
+
+18. 屏蔽词可视化管理：在“弹幕设置”总菜单中选择“弹幕屏蔽”，即可在界面内添加、删除屏蔽规则（`.txt` 格式只支持删除；`.xml` / `.json` 格式还支持启用/停用与修改），支持 `.txt` / `.xml`（弹弹play）/ `.json`（bilibili）三种格式，修改后立即生效
 
 无需亲自下载整合弹幕文件资源，无需亲自处理文件格式转换，在mpv播放器中一键加载包含了哔哩哔哩、巴哈姆特等弹幕网站弹幕的弹弹play的动画弹幕。
 
@@ -85,7 +97,6 @@
   - [设置弹幕延迟（可选）](#设置弹幕延迟可选)
   - [保存当前视频弹幕（可选）](#保存当前视频弹幕可选)
   - [清空当前视频关联的弹幕源（可选）](#清空当前视频关联的弹幕源可选)
-  - [检查脚本更新（可选）](#检查脚本更新可选)
 - [可配置选项（可选）](#可配置选项可选)
   - [弹幕加载相关](#弹幕加载相关)
   - [弹幕显示相关](#弹幕显示相关)
@@ -116,7 +127,13 @@
 └── scripts
 ```
 
-想要使用本插件，请将本插件完整地[下载](https://github.com/Tony15246/uosc_danmaku/releases)或者克隆到 `scripts`目录下即可使用，文件结构参阅下方
+想要使用本插件，请将本插件完整地[下载](https://github.com/Tangerinell/uosc_danmaku)或者克隆到 `scripts`目录下即可使用，文件结构参阅下方
+
+> 本 fork 暂未发布 releases，请克隆仓库或下载仓库 zip 后解压到 `scripts`目录：
+>
+> ```
+> git clone https://github.com/Tangerinell/uosc_danmaku.git
+> ```
 
 > [!IMPORTANT]
 > 
@@ -130,18 +147,27 @@
 ~/.config/mpv/scripts
 └── uosc_danmaku
     ├── apis
-    │   ├── dandanplay.lua
-    │   └── extra.lua
+    │   ├── dandanplay.lua
+    │   └── extra.lua
+    ├── dicts
     ├── LICENSE
     ├── main.lua
     ├── modules
-    │   ├── base64.lua
-    │   ├── guess.lua
-    │   ├── md5.lua
-    │   ├── menu.lua
-    │   ├── options.lua
-    │   ├── render.lua
-    │   └── utils.lua
+    │   ├── aes.lua
+    │   ├── base64.lua
+    │   ├── blacklist.lua
+    │   ├── guess.lua
+    │   ├── hash.lua
+    │   ├── inflate.lua
+    │   ├── md5.lua
+    │   ├── menu.lua
+    │   ├── options.lua
+    │   ├── parse.lua
+    │   ├── render.lua
+    │   └── utils.lua
+    ├── sites
+    ├── uosc_danmaku.conf
+    ├── title_replace.example.json
     └── README.md
 ```
 
@@ -166,13 +192,15 @@
 controls=menu,gap,subtitles,<has_many_audio>audio,<has_many_video>video,<has_many_edition>editions,<stream>stream-quality,gap,space,speed,space,shuffle,loop-playlist,loop-file,gap,prev,items,next,gap,fullscreen
 ```
 
-在 `controls`控件配置项中添加 `button:danmaku`的弹幕搜索按钮、`button:danmaku_auto`的自动匹配开关，以及 `cycle:toggle_on:show_danmaku@uosc_danmaku:on=toggle_on/off=toggle_off?弹幕开关`的弹幕显示开关。放置的位置就是实际会在在进度条上方的控件条中显示的位置，可以放在自己喜欢的位置。添加完控件的配置大概如下：
+在 `controls`控件配置项中添加 `button:danmaku`的弹幕搜索按钮、`button:danmaku_auto`的自动匹配开关，以及弹幕显示开关。弹幕显示开关推荐直接使用 `button:danmaku_display`（图标固定、悬停提示随开关状态变化）；仍可使用 `cycle:toggle_on:show_danmaku@uosc_danmaku:on=toggle_on/off=toggle_off?弹幕开关`，两种写法均可。放置的位置就是实际会在在进度条上方的控件条中显示的位置，可以放在自己喜欢的位置。添加完控件的配置大概如下：
 
 自动匹配开关和弹幕显示开关相互独立。自动匹配开关只控制联网的标题/源搜索，不影响同目录或 `save_danmaku_path` 中已保存 XML 的自动加载，也不影响手动搜索。通过 uosc 控件或快捷键切换自动匹配后，状态会写入 `history_path` 指定的历史文件，在切换视频及重启 mpv 后继续沿用；`auto_matching` 仅作为没有历史状态时的初始默认值。
 
 ```
-controls=menu,gap,subtitles,<has_many_audio>audio,<has_many_video>video,<has_many_edition>editions,<stream>stream-quality,button:danmaku,button:danmaku_auto,cycle:toggle_on:show_danmaku@uosc_danmaku:on=toggle_on/off=toggle_off?弹幕开关,gap,space,speed,space,shuffle,loop-playlist,loop-file,gap,prev,items,next,gap,fullscreen
+controls=menu,gap,subtitles,<has_many_audio>audio,<has_many_video>video,<has_many_edition>editions,<stream>stream-quality,button:danmaku,button:danmaku_auto,button:danmaku_display,gap,space,speed,space,shuffle,loop-playlist,loop-file,gap,prev,items,next,gap,fullscreen
 ```
+
+> 若使用 `button:danmaku_display`，则无需再添加 `cycle:toggle_on:show_danmaku@uosc_danmaku` 控件（两者共存也可以，只是功能重复）。
 
 </details>
 
@@ -216,7 +244,7 @@ j script-message show_danmaku_keyboard
 Ctrl+Shift+d script-message toggle-auto-matching
 ```
 
-> 根据[此issue中的需求](https://github.com/Tony15246/uosc_danmaku/issues/6)，添加了通过uosc_danmaku.conf绑定快捷键的功能。（请注意，最高优先级仍然是input.conf中设置的快捷键）
+> 根据社区需求，添加了通过uosc_danmaku.conf绑定快捷键的功能。（请注意，最高优先级仍然是input.conf中设置的快捷键）
 > 想要在uosc_danmaku.conf中自定义快捷键，可以像下面这样更改默认快捷键。
 
 ```
@@ -255,7 +283,7 @@ https://ani.gamer.com.tw/animeVideo.php?sn=36843
 key script-message open_add_source_menu
 ```
 
-现已添加了对加载本地弹幕文件的支持，输入本地弹幕文件的绝对路径即可使用本插件加载弹幕。加载出来的弹幕样式同在本插件中设置的弹幕样式。支持的文件格式有ass文件和xml文件。具体可参见[此issue](https://github.com/Tony15246/uosc_danmaku/issues/26)
+现已添加了对加载本地弹幕文件的支持，输入本地弹幕文件的绝对路径即可使用本插件加载弹幕。加载出来的弹幕样式同在本插件中设置的弹幕样式。支持的文件格式有ass文件和xml文件。
 
 ```
 #Linux下示例
@@ -305,7 +333,7 @@ key script-message open_danmaku_style_menu
 
 > #### 弹幕设置总菜单（可选）
 
-打开多级功能复合菜单，包含了插件目前所有的图形化功能。想要启用此功能，需要参照[uosc控件配置](#uosc控件配置)，根据uosc版本添加 `button:danmaku_menu`或 `command:grid_view:script-message open_add_total_menu?弹幕设置`到 `uosc.conf`的controls配置项中。
+打开多级功能复合菜单，包含了插件目前所有的图形化功能（弹幕搜索、从源添加弹幕、弹幕源延迟设置、弹幕样式、弹幕屏蔽、弹幕内容）。想要启用此功能，需要参照[uosc控件配置](#uosc控件配置)，根据uosc版本添加 `button:danmaku_menu`或 `command:grid_view:script-message open_add_total_menu?弹幕设置`到 `uosc.conf`的controls配置项中。
 
 想要通过快捷键使用此功能，请添加类似下面的配置到 `input.conf`中。从源添加弹幕功能对应的脚本消息为 `open_add_total_menu`。
 
@@ -333,7 +361,7 @@ key script-message danmaku-delay <seconds>
 key script-message danmaku-delay <seconds> ${=time-pos}
 ```
 
-> 当前弹幕延迟的值可以从 `user-data/uosc_danmaku/danmaku-delay`属性中获取到，具体用法可以参考[此issue](https://github.com/Tony15246/uosc_danmaku/issues/77)
+> 当前弹幕延迟的值可以从 `user-data/uosc_danmaku/danmaku-delay`属性中获取到
 
 </details>
 
@@ -363,21 +391,6 @@ key script-message immediately_save_danmaku
 
 ```
 key script-message clear-source
-```
-
-</details>
-
-<details>
-<summary>检查脚本更新</summary>
-
-> #### 检查脚本更新（可选）
-
-可以通过绑定以下脚本命令来实现检查并自动更新脚本
-
-> 只会检查 `Releases`中发布的更新
-
-```
-key script-message check-update
 ```
 
 </details>
@@ -509,7 +522,7 @@ autoload_for_url
 
 开启此选项后，会为可能支持的 url 视频文件实现弹幕关联记忆和继承，配合播放列表食用效果最佳。目前兼容在使用[embyToLocalPlayer](https://github.com/kjtsune/embyToLocalPlayer)、[mpv-torrserver](https://github.com/dyphire/mpv-config/blob/master/scripts/mpv-torrserver.lua)、[tsukimi](https://github.com/tsukinaha/tsukimi)等场景时进行弹幕关联记忆和继承。
 
-目前的具体支持情况和实现效果可以参考[此pr](https://github.com/Tony15246/uosc_danmaku/pull/16)
+目前的具体支持情况和实现效果见上方说明
 
 另外，开启此选项后还会在网络播放bilibili以及巴哈姆特的视频时自动加载对应视频的弹幕，可配合[Play-With-MPV](https://github.com/LuckyPuppy514/Play-With-MPV)或[ff2mpv](https://github.com/woodruffw/ff2mpv)等网络播放手段使用。（播放巴哈姆特的视频时弹幕自动加载如果失败，请检查[proxy](#proxy)选项配置是否正确）
 
@@ -942,7 +955,7 @@ fallback_server
 
 > **⚠️NOTE！**
 >
-> 插件已在 `sites` 目录下内置了各大常规视频网站的弹幕站点专用解析器（[#377](https://github.com/Tony15246/uosc_danmaku/pull/377) [#380](https://github.com/Tony15246/uosc_danmaku/pull/380)），仅当专用解析器都无法解析获取站点弹幕时才会使用兜底服务器
+> 插件已在 `sites` 目录下内置了各大常规视频网站的弹幕站点专用解析器，仅当专用解析器都无法解析获取站点弹幕时才会使用兜底服务器
 >
 > 不设置此选项的情况下默认使用 ` https://dmku.hls.one`作为兜底服务器
 
@@ -1050,6 +1063,56 @@ proxy=127.0.0.1:7890
 
 <details>
 <summary>
+cookie_file
+
+> 指定请求时使用的 cookie 文件
+
+</summary>
+
+### cookie_file
+
+#### 功能说明
+
+可选。指定一个 Netscape 格式的 cookie 文件（`curl --cookie` 用法），发送网络请求时带上，用于需要登录态或限制地区的接口。留空则不使用。
+
+#### 使用方法
+
+```
+cookie_file=/path/to/your/cookies.txt
+```
+
+</details>
+
+---
+
+<details>
+<summary>
+message_alignment
+
+> 自定义插件相关提示的对齐方式
+
+</summary>
+
+### message_alignment
+
+#### 功能说明
+
+指定脚本相关提示消息的 ASS 对齐方式（`\an` 值，1-9），需配合 `message_x` 与 `message_y` 使用。例如 7 表示左上角对齐，5 表示居中。
+
+#### 使用方法
+
+```
+message_alignment=7
+message_x=30
+message_y=30
+```
+
+</details>
+
+---
+
+<details>
+<summary>
 message_x
 
 > 自定义插件相关提示的显示位置（x轴）
@@ -1112,12 +1175,32 @@ title_replace
 
 自定义标题解析中的额外替换规则，内容格式为 JSON 字符串，替换模式为 lua 的 string.gsub 函数
 
+也支持填写 JSON 规则文件的路径（如 `~~/script-opts/title_replace.json`），文件内容格式与下方示例字符串规则相同。使用文件时，规则会在每次解析标题时现场读取，因此修改规则文件后无需重启 mpv 即可生效；文件不存在或解析失败时标题原样通过并在控制台给出提示。规则与内置的标题候选逐步剥离功能互不影响：这里写空或留空配置时，仍会使用内置剥离逻辑。
+
 注意⚠️：由于 mpv 的 lua 版本限制，自定义规则只支持形如 %n 的捕获组写法，即示例用法，不支持直接替换字符的写法
 
 用法示例：
 
 ```
-title_replace=[{"rules":[{ "^〔(.-)〕": "%1"},{ "^.*《(.-)》": "%1" }]}]
+# 内联 JSON 字符串
+title_replace=[[[{"rules":[{ "^〔(.-)〕": "%1"},{ "^.*《(.-)》": "%1" }]}]]
+
+# 或指向规则文件
+title_replace=~~/script-opts/title_replace.json
+```
+
+`title_replace.json` 内容示例（也可参考项目根目录的 `title_replace.example.json` 模板）：
+
+```json
+[
+  {
+    "rules": [
+      { "^〔(.-)〕": "%1" },
+      { "^.*《(.-)》": "%1" },
+      { "GBCN": "" }
+    ]
+  }
+]
 ```
 
 </details>
@@ -1175,6 +1258,36 @@ history_path=/path/to/your/danmaku-history.json
 
 ---
 
+<details>
+<summary>
+search_history_path
+
+> 指定弹幕搜索历史记录文件路径
+
+</summary>
+
+### search_history_path
+
+#### 功能说明
+
+指定弹幕搜索历史记录文件的路径，支持绝对路径和相对路径。默认值是 `~~/danmaku-search-history.json`，即 mpv 配置文件夹的根目录下。留空则不记录搜索历史。
+
+开启后，搜索菜单会在预填的识别标题之后追加历史条目：点击条目可直接重新搜索，条目右侧的删除按钮可移除单条记录。使用 `mp.input`（未安装 uosc）时，历史会显示在输入框下方日志区，输入序号即可快速重搜对应关键词。
+
+#### 使用示例
+
+```
+search_history_path=/path/to/your/danmaku-search-history.json
+# 最多保留的条数，小于 1 表示不限制
+search_history_size=15
+```
+
+> 文件所在目录不存在时会自动创建（含多级目录）；`blacklist_path`、`history_path`、`save_danmaku_path` 同理。
+
+</details>
+
+---
+
 ### 自定义弹幕样式相关配置
 
 默认配置如下，可根据需求更改并自定义弹幕样式
@@ -1198,24 +1311,27 @@ bold=yes
 displayarea=0.85
 #描边 0-4
 outline=1
-#指定弹幕屏蔽词文件路径(black.txt)，支持绝对路径和相对路径。文件内容以换行分隔
-##支持 lua 的正则表达式写法
-blacklist_path=
+#指定弹幕屏蔽词文件路径，支持 .txt / .xml / .json 三种格式，支持绝对路径和相对路径
+#推荐 .xml（弹弹play 格式）或 .json（bilibili 格式），这两种支持“修改 / 启停 / 删除”
+#.txt 每行一条、每行始终生效，仅支持删除
+blacklist_path=~~/cache/danmaku-blacklist.xml
 ```
+
+> `blacklist_path` 支持 `.txt` / `.xml`（弹弹play 格式）/ `.json`（bilibili 格式）三种文件。配置后在播放中打开“弹幕设置”总菜单，进入“弹幕屏蔽”项即可直接在界面里添加规则；`.xml` / `.json` 格式还支持启用/停用与修改，`.txt` 格式每行始终生效、只支持删除。文件或目录不存在时，可在菜单里点“新建”或直接输入屏蔽词回车自动创建。保存后立即生效，无需重启 mpv。
 
 ## 插件自定义属性
 
 - `user-data/uosc_danmaku/danmaku-delay`
 
-    从 `user-data/uosc_danmaku/danmaku-delay`属性中可以获取到当前弹幕延迟的值，具体用法可以参考[此issue](https://github.com/Tony15246/uosc_danmaku/issues/77)
+    从 `user-data/uosc_danmaku/danmaku-delay`属性中可以获取到当前弹幕延迟的值
 
 - `user-data/uosc_danmaku/has-danmaku`
 
-    从`user-data/uosc_danmaku/has-danmaku`属性中可以获取到表示当前是否有弹幕在显示的布尔值，具体用法可以参考[此pr](https://github.com/Tony15246/uosc_danmaku/pull/276)
+    从`user-data/uosc_danmaku/has-danmaku`属性中可以获取到表示当前是否有弹幕在显示的布尔值
 
 - `user-data/uosc_danmaku/danmaku-switch-on`
 
-    从`user-data/uosc_danmaku/danmaku-switch-on`属性中可以获取到表示当前弹幕开关状态的布尔值，具体用法可以参考[此issue](https://github.com/Tony15246/uosc_danmaku/issues/362)
+    从`user-data/uosc_danmaku/danmaku-switch-on`属性中可以获取到表示当前弹幕开关状态的布尔值
 
 - `user-data/uosc_danmaku/danmaku-count`
 
@@ -1262,5 +1378,5 @@ blacklist_path=
 
 ## 相关项目
 
-- [slqy123/uosc_danmaku](https://github.com/slqy123/uosc_danmaku) 本项目的fork版本，实现了通过dandanplay api发送弹幕的功能，由于版本的兼容性以及功能的易用性问题未被合并，具体讨论请参阅 [#220](https://github.com/Tony15246/uosc_danmaku/pull/220)
-- ~~[Loukyuu1120/uosc_danmaku](https://github.com/Loukyuu1120/uosc_danmaku) 本项目的fork版本，实现了自定义多个 api_servers 与 弹幕来源选择菜单 功能，具体讨论请参阅 [#282](https://github.com/Tony15246/uosc_danmaku/issues/282)~~ 相关功能主仓库已实现
+- [slqy123/uosc_danmaku](https://github.com/slqy123/uosc_danmaku) 本项目的fork版本，实现了通过dandanplay api发送弹幕的功能（相关功能未合并）
+- ~~[Loukyuu1120/uosc_danmaku](https://github.com/Loukyuu1120/uosc_danmaku) 本项目的fork版本，实现了自定义多个 api_servers 与 弹幕来源选择菜单 功能~~ 相关功能已在本 fork 实现

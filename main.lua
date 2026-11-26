@@ -1,4 +1,10 @@
-VERSION = "2.2.0.1"
+-- Fork 版本：基于上游 Tony15246/uosc_danmaku master（合并基点 74ade6c，2026-11-25）
+-- 本次合并内容：搜索历史、黑名单菜单、title_replace 规则文件、
+-- 搜索完成统计行、网络流历史加载思路吸收、message_alignment 改名
+-- 附加改动：已移除内置脚本自动更新/检查更新（check-update + modules/update.lua），
+-- 防止检查更新时被上游发行版覆盖本 fork 的修改；更新请手动拉取本仓库。
+-- 合并日期：2026-11-26
+VERSION = "2.2.0.2"
 
 mp.commandv('script-message', 'uosc_danmaku-version', VERSION)
 
@@ -15,8 +21,8 @@ require("modules/utils")
 require("modules/parse")
 require("modules/guess")
 require('modules/render')
+require('modules/blacklist')
 require('modules/menu')
-require("modules/update")
 
 require("apis/dandanplay")
 require('apis/extra')
@@ -715,32 +721,9 @@ end
 -- 保存前创建指定目录，支持多级目录；默认视频目录不做额外创建。
 local function ensure_danmaku_directory(directory)
     if not directory or directory == "" then return false end
-    local info = utils.file_info(directory)
-    if info and info.is_dir then return true end
-
-    local args
-    if PLATFORM == "windows" then
-        local escaped = tostring(directory):gsub("'", "''")
-        local command = "[System.IO.Directory]::CreateDirectory('" .. escaped .. "') | Out-Null"
-        args = { "powershell", "-NoProfile", "-NonInteractive", "-Command", command }
-    else
-        args = { "mkdir", "-p", directory }
-    end
-
-    local result = mp.command_native({
-        name = "subprocess",
-        args = args,
-        capture_stdout = true,
-        capture_stderr = true,
-        playback_only = false,
-    })
-    info = utils.file_info(directory)
-    if not (info and info.is_dir) then
-        msg.error("创建弹幕保存目录失败：" .. tostring(directory) .. "，" ..
-            tostring(result and (result.stderr or result.stdout) or "未知错误"))
-        return false
-    end
-    return true
+    if ensure_directory(directory) then return true end
+    msg.error("创建弹幕保存目录失败：" .. tostring(directory))
+    return false
 end
 
 -- 查找保存过的本地 XML。普通本地视频优先查视频同目录；ISO、光盘和 URL
@@ -1114,15 +1097,24 @@ mp.register_event("file-loaded", function()
         end
     end
 
-    if not video or video["image"] or video["albumart"] or fps < 23 then
+    -- 纯本地操作先行（吸收上游 b6ba473 思路）：历史源记录与本地 XML 的
+    -- 读取不受帧率/轨道就绪检查影响，网络流（帧率/标题晚到）也能立即
+    -- 恢复历史关联与本地弹幕；下方帧率检查只用于控制联网匹配时机。
+    read_danmaku_source_record(path)
+
+    -- 纯音频（无视频轨或仅封面）不加载弹幕
+    if not video or video["image"] or video["albumart"] then
         return
     end
-
-    read_danmaku_source_record(path)
 
     -- 本地 XML 查找不受自动匹配总开关影响；开关只控制后续联网搜索。
     -- 普通文件查同目录或指定目录，ISO、光盘和 URL 按保存目录查找。
     if should_load_saved_local and load_saved_danmaku(path, filename) then
+        return
+    end
+
+    -- 帧率未就绪时联网匹配由上方调度 waiting 重试，这里直接结束本轮。
+    if fps < 23 then
         return
     end
 
@@ -1234,7 +1226,6 @@ mp.register_script_message("auto_load_fallback", function()
     end
 end)
 
-mp.register_script_message("check-update", check_for_update)
 mp.register_script_message("clear-source", clear_source)
 mp.register_script_message("immediately_save_danmaku", save_danmaku)
 mp.register_script_message("open_source_delay_menu", open_delay_menu)
