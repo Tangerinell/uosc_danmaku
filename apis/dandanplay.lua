@@ -2,6 +2,23 @@ local msg = require('mp.msg')
 local utils = require("mp.utils")
 local unpack = unpack or table.unpack
 
+-- 提前声明，供 match_episode 在函数定义之前引用。
+local classify_search_result_type
+
+-- 光盘/镜像媒体不适合先做哈希探测：镜像体积大、哈希通常不在弹弹库中，
+-- 且标题搜索本来就能稳定匹配。
+local function is_disc_media_path(path)
+    if type(path) ~= "string" or path == "" then return false end
+    local lower = path:lower()
+    return lower:match("%.iso$") ~= nil
+        or lower:find("bd://", 1, true) ~= nil
+        or lower:find("dvd://", 1, true) ~= nil
+        or lower:find("bluray://", 1, true) ~= nil
+        or lower:find("dvdread://", 1, true) ~= nil
+        or lower:find("[/\\]bdmv[/\\]", 1, true) ~= nil
+        or lower:find("[/\\]video_ts[/\\]", 1, true) ~= nil
+end
+
 local function extract_url(url)
     local path = url:match("^https?://[^/]+(/[^%?]*)")
     return path
@@ -244,7 +261,7 @@ local function normalize_danmaku_response(d)
 end
 
 -- 尝试通过解析文件名匹配剧集
-local function match_episode(animeTitle, bangumiId, episode_num, api_server)
+local function match_episode(animeTitle, bangumiId, episode_num, api_server, result_type)
     local url = api_server .. "/api/v2/bangumi/" .. bangumiId
     local args = make_danmaku_request_args("GET", url)
 
@@ -274,6 +291,36 @@ local function match_episode(animeTitle, bangumiId, episode_num, api_server)
             return
         end
 
+        if result_type ~= "series" and result_type ~= "movie" then
+            result_type = classify_search_result_type(nil, nil, result_type)
+        end
+
+        local numeric_count = 0
+        for _, episode in ipairs(data.bangumi.episodes) do
+            if tonumber(episode.episodeNumber) then
+                numeric_count = numeric_count + 1
+            end
+        end
+        -- 类型未知时，用“是否有多条带数字的剧集记录”推断是否为连续剧。
+        if not result_type and numeric_count > 1 then
+            result_type = "series"
+        end
+
+        -- 标题没有集数、目录没有历史、且确认是多集剧集时，不再默认选择第一集。
+        if not episode_num and result_type == "series" and numeric_count > 1
+            and auto_match_episode_unknown() then
+            local action = get_auto_match_ambiguous_action()
+            if action == "menu" then
+                enter_auto_match_episode_menu()
+                mp.commandv("script-message", "search-episodes-event",
+                    animeTitle, tostring(bangumiId), api_server)
+                return
+            elseif action == "skip" then
+                finish_auto_match_ambiguous()
+                return
+            end
+        end
+
         local matched_episode = nil
         local first_episode = data.bangumi.episodes[1]
         for _, episode in ipairs(data.bangumi.episodes) do
@@ -282,7 +329,7 @@ local function match_episode(animeTitle, bangumiId, episode_num, api_server)
                 matched_episode = episode
                 break
             elseif not episode_num and ep_num and not matched_episode then
-                -- 电影没有集数，优先选择第一条带数字集数的记录。
+                -- 电影没有单集歧义，优先选择第一条带数字集数的记录。
                 matched_episode = episode
             end
         end
@@ -313,7 +360,7 @@ end
 
 -- 只从搜索结果自身提供的分类/类型描述判断是否为剧集，避免把标题文字
 -- 当成类型。返回 nil 表示类型未知，未知类型仍按原有候选顺序处理。
-local function classify_search_result_type(category, description, type_value)
+function classify_search_result_type(category, description, type_value)
     local category_text = tostring(category or "")
     local description_text = tostring(description or "")
     local type_text = tostring(type_value or "")
@@ -402,10 +449,23 @@ local function match_extra_anime(title, season_num, episode_num, callback)
 
         if category == "电影" then
             -- 复用已有的外部电影处理逻辑，直接加载播放页弹幕。
-            mp.commandv(unpack(value))
+            -- 必须显式标记为自动操作，否则会弹出“弹幕源添加成功”的手动菜单。
+            local auto_value = {}
+            for i, arg in ipairs(value) do auto_value[i] = arg end
+            auto_value[#auto_value + 1] = "true"
+            auto_value[#auto_value + 1] = ""
+            auto_value[#auto_value + 1] = ""
+            mp.commandv(unpack(auto_value))
         else
-            -- 外部剧集按当前媒体集数加载；无集数或集数不存在时由 get_details 取第一集。
-            get_details(category, id, source_id, result_title, year, nil, episode_num, true)
+            -- 外部剧集按当前媒体集数加载；无集数时由 get_details 根据歧义策略处理。
+            local ambiguous_action = nil
+            if not episode_num and auto_match_episode_unknown() then
+                ambiguous_action = get_auto_match_ambiguous_action()
+                if ambiguous_action == "menu" then
+                    enter_auto_match_episode_menu()
+                end
+            end
+            get_details(category, id, source_id, result_title, year, nil, episode_num, true, ambiguous_action)
         end
         callback(true)
     end)
@@ -506,7 +566,8 @@ local function match_anime_by_title()
             if best_match and (best_score >= 0.75 or unique_non_chinese_match) then
                 matched = true
                 msg.info(("模糊匹配选中: %s (score=%.2f)"):format(best_match.animeTitle, best_score))
-                match_episode(best_match.animeTitle, best_match.bangumiId, episode_num, best_server)
+                match_episode(best_match.animeTitle, best_match.bangumiId, episode_num, best_server,
+                    classify_search_result_type(nil, best_match.typeDescription, best_match.type))
                 if cancel_fn then pcall(cancel_fn) end
                 return
             end
@@ -551,13 +612,36 @@ local function is_background_search_item_series(item)
     return classify_search_result_type(nil, item.hint, item.auto_type) == "series"
 end
 
+-- 以手动选集方式打开后台搜索到的剧集列表。
+local function open_ambiguous_episode_menu(item)
+    local value = item.value
+    if value[3] == "search-episodes-event" then
+        -- 弹弹 Play：直接进入剧集列表。
+        mp.commandv("script-message", "search-episodes-event", value[4], value[5], value[6])
+    elseif value[3] == "get-extra-event" then
+        -- 外部源：以手动选集方式打开详情菜单。
+        enter_auto_match_episode_menu()
+        get_details(value[4], value[5], value[7], value[8], value[9], nil, nil, true, "menu")
+    end
+end
+
 -- 从与手动搜索完全相同的结果列表中选择可直接加载的条目。
 -- 有集数时优先剧集；没有剧集结果时回退到原顺序中的首个条目。
-local function select_background_search_item(items, episode_num)
+local function select_background_search_item(items, episode_num, episode_unknown)
     local function select_item(item)
         if not is_background_search_item_actionable(item) then return false end
 
         local value = item.value
+        local ambiguous = episode_unknown and is_background_search_item_series(item)
+        local ambiguous_action = ambiguous and get_auto_match_ambiguous_action() or nil
+
+        -- menu 直接打开剧集列表；skip/first 交给下层根据实际集数判断，
+        -- 单集剧集仍然可以正常自动加载。
+        if ambiguous_action == "menu" then
+            open_ambiguous_episode_menu(item)
+            return true
+        end
+
         if value[3] == "get-extra-event" then
             -- 通过事件入口加载外部源，并显式标记为自动操作，避免事件
             -- 把 AUTO_MATCHING 错误地切换成手动模式；剧集使用当前集数。
@@ -565,9 +649,11 @@ local function select_background_search_item(items, episode_num)
             for i, arg in ipairs(value) do auto_value[i] = arg end
             auto_value[#auto_value + 1] = "true"
             auto_value[#auto_value + 1] = episode_num and tostring(episode_num) or ""
+            auto_value[#auto_value + 1] = ambiguous_action or ""
             mp.commandv(unpack(auto_value))
         else
-            match_episode(value[4], value[5], episode_num, value[6])
+            match_episode(value[4], value[5], episode_num, value[6],
+                classify_search_result_type(nil, item.hint, item.auto_type))
         end
         return true
     end
@@ -608,12 +694,14 @@ local function match_anime(on_failed, skip_background)
     -- 旧异步请求回调又把“搜索中”提示显示回来。
     show_auto_match_status("自动搜索匹配弹幕中...", 30)
 
+    local episode_unknown = auto_match_episode_unknown()
+
     if not skip_background and type(search_anime_background) == "function" then
         search_anime_background(title, function(items)
             if type(cache_anime_search_results) == "function" then
                 cache_anime_search_results(title, items)
             end
-            if select_background_search_item(items, episode_num) then
+            if select_background_search_item(items, episode_num, episode_unknown) then
                 msg.info("后台手动搜索已自动关联弹幕")
                 return
             end
@@ -673,43 +761,135 @@ local function match_file(file_path, file_name, callback)
 
     local matched = false
     local cancel_fn = nil
+    local episode_unknown = auto_match_episode_unknown()
+    local ambiguous_action = episode_unknown and get_auto_match_ambiguous_action() or nil
+    -- 标题无集数且目录无历史时，先确认是否存在精确哈希匹配。
+    -- first 模式不需要探测，保持原有的快速路径。
+    local probe_hash_only = episode_unknown and ambiguous_action ~= "first" and hash ~= nil
 
-    local function build_args(server)
-        local url = server .. "/api/v2/match"
-        return make_danmaku_request_args("POST", url, { ["Content-Type"] = "application/json" }, {
-            fileName = file_name,
-            fileHash = hash or "a1b2c3d4e5f67890abcd1234ef567890",
-            matchMode = "hashAndFileName"
-        })
+    local function apply_match(match, server)
+        DANMAKU.anime = match.animeTitle
+        DANMAKU.episode = match.episodeTitle
+        set_episode_id(match.episodeId, nil, server)
     end
 
-    local function per_response(server, err, out)
+    -- 文件名匹配到的第一集仍然可能是默认第一集；先确认该条目是否真的只有一集。
+    local function resolve_ambiguous_match(match, server)
+        local bangumi_id = match.animeId or match.bangumiId
+        local function stop_without_loading()
+            if ambiguous_action == "menu" and bangumi_id then
+                enter_auto_match_episode_menu()
+                mp.commandv("script-message", "search-episodes-event",
+                    match.animeTitle, tostring(bangumi_id), server)
+            else
+                finish_auto_match_ambiguous()
+            end
+            if callback then pcall(callback) end
+        end
+
+        if not bangumi_id then
+            stop_without_loading()
+            return
+        end
+        local args = make_danmaku_request_args("GET", server .. "/api/v2/bangumi/" .. bangumi_id)
+        if not args then
+            stop_without_loading()
+            return
+        end
+        call_cmd_async(args, function(error, json)
+            local detail = (not error) and utils.parse_json(json) or nil
+            local numeric_count = 0
+            if detail and detail.bangumi and detail.bangumi.episodes then
+                for _, episode in ipairs(detail.bangumi.episodes) do
+                    if tonumber(episode.episodeNumber) then
+                        numeric_count = numeric_count + 1
+                    end
+                end
+            end
+            -- 只有明确查到一集正片时才按单集剧集直接加载；
+            -- 查询失败或集数信息缺失时仍按歧义处理，避免又猜第一集。
+            if numeric_count == 1 then
+                apply_match(match, server)
+                if callback then pcall(callback) end
+            else
+                stop_without_loading()
+            end
+        end)
+    end
+
+    local function handle_response(server, err, out, exact_hash_only)
         if matched then return end
         if err then
             msg.debug(("match failed for %s: %s"):format(server, tostring(err)))
             return
         end
         local data = utils.parse_json(out)
-        if not data or not data.isMatched then
+        if not data or not data.isMatched or not data.matches or not data.matches[1] then
             return
         end
-        matched = true
-        DANMAKU.anime = data.matches[1].animeTitle
-        DANMAKU.episode = data.matches[1].episodeTitle
 
-        set_episode_id(data.matches[1].episodeId, nil, server)
+        local match = data.matches[1]
+        matched = true
         if cancel_fn then pcall(cancel_fn) end
+
+        -- hashOnly 命中就是文件内容精确匹配，不管第几集都直接采用。
+        if exact_hash_only then
+            apply_match(match, server)
+            if callback then pcall(callback) end
+            return
+        end
+
+        local match_type = classify_search_result_type(nil, match.typeDescription, match.type)
+        local episode_id = tonumber(match.episodeId)
+        local episode_index = episode_id and (episode_id % 1000) or nil
+        -- 文件名匹配到第一集（或无法判断集数）时才可能是默认第一集；
+        -- 匹配到其它集数时，说明文件名已经明确指向该集，直接采用。
+        if ambiguous_action and ambiguous_action ~= "first" and match_type == "series"
+            and (episode_index == nil or episode_index <= 1) then
+            resolve_ambiguous_match(match, server)
+            return
+        end
+
+        apply_match(match, server)
         if callback then pcall(callback) end
     end
 
-    local function final_cb()
-        if not matched then
-            mp.commandv("script-message", "auto_load_fallback")
-            callback("没有找到hash匹配的剧集")
+    local function run_requests(mode, exact_hash_only, on_no_match)
+        local function build_args(server)
+            local url = server .. "/api/v2/match"
+            return make_danmaku_request_args("POST", url, { ["Content-Type"] = "application/json" }, {
+                fileName = file_name,
+                fileHash = hash or "a1b2c3d4e5f67890abcd1234ef567890",
+                matchMode = mode
+            })
         end
+
+        local function final_cb()
+            if matched then return end
+            if on_no_match then pcall(on_no_match) end
+        end
+
+        cancel_fn = parallel_requests(servers, build_args, function(server, err, out)
+            handle_response(server, err, out, exact_hash_only)
+        end, final_cb, { concurrency = 5, per_request_timeout = 60 })
     end
 
-    cancel_fn = parallel_requests(servers, build_args, per_response, final_cb, { concurrency = 5, per_request_timeout = 60 })
+    local function run_filename_matching()
+        run_requests("hashAndFileName", false, function()
+            if matched then return end
+            -- 哈希优先后还要继续标题搜索，不能在这里提前显示“自动匹配未找到弹幕”。
+            if not (episode_unknown and ambiguous_action ~= "first") then
+                mp.commandv("script-message", "auto_load_fallback")
+            end
+            if callback then pcall(callback, "没有找到hash匹配的剧集") end
+        end)
+    end
+
+    if probe_hash_only then
+        run_requests("hashOnly", true, run_filename_matching)
+    else
+        run_filename_matching()
+    end
 end
 
 -- 异步获取弹幕数据
@@ -1052,8 +1232,17 @@ function get_danmaku_with_hash(file_name, file_path)
     end
 
     if title then
-        -- 所有可解析标题先走后台手动搜索；失败时普通文件再使用哈希兜底。
-        match_anime(run_hash_matching)
+        local current_path = mp.get_property("path") or file_path
+        local disc_media = is_disc_media_path(current_path) or is_disc_media_path(file_path)
+        if not disc_media and auto_match_episode_unknown()
+            and get_auto_match_ambiguous_action() ~= "first" then
+            -- 普通视频标题无法确定集数且目录无历史时，先确认是否存在精确哈希匹配，
+            -- 避免标题搜索得到的“第一集”结论覆盖掉精确的非第一集结果。
+            run_hash_matching()
+        else
+            -- 光盘/镜像和其他情况保持原顺序：先标题搜索，失败后再哈希兜底。
+            match_anime(run_hash_matching)
+        end
     else
         run_hash_matching()
     end

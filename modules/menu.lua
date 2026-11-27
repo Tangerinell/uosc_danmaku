@@ -4,7 +4,8 @@ local unpack = unpack or table.unpack
 
 input_loaded, input = pcall(require, "mp.input")
 uosc_available = false
-latest_menu_anime = {}
+-- 使用字符串保存菜单 JSON；空字符串表示当前没有可返回的搜索菜单。
+latest_menu_anime = ""
 local active_request_cancel = nil
 local active_request_type = nil
 local request_cancelled = false
@@ -19,7 +20,7 @@ end
 local function clear_manual_search_cache()
     manual_search_cache = nil
     manual_search_cache_path = nil
-    latest_menu_anime = {}
+    latest_menu_anime = ""
 end
 
 local function get_manual_search_cache()
@@ -2140,6 +2141,12 @@ mp.register_script_message("open_content_danmaku_menu", function()
 end)
 
 mp.register_script_message("open-latest-menu-anime", function ()
+    -- 自动匹配直接打开剧集列表时没有经过搜索菜单，latest_menu_anime 可能
+    -- 仍是空字符串。此时不能再把它传给 uosc，否则菜单会因参数无效而中断。
+    if type(latest_menu_anime) ~= "string" or latest_menu_anime == "" then
+        mp.commandv("script-message", "open_search_danmaku_menu")
+        return
+    end
     if uosc_available then
         mp.commandv("script-message-to", "uosc", "open-menu", latest_menu_anime)
     elseif input_loaded then

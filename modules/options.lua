@@ -23,8 +23,9 @@ options = {
     show_danmaku_default = false,
     -- 自动加载可能支持的 url 视频文件实现弹幕关联记忆和继承，配合播放列表食用效果最佳
     autoload_for_url = false,
-    -- 当自动弹幕加载失败时，自动弹出搜索框让用户手动搜索
-    auto_fallback_search = false,
+    -- 自动匹配到多集剧集、但标题没有明确集数且目录没有匹配历史时的处理方式：
+    -- skip=不加载并提示，menu=打开剧集列表让用户选择，first=直接选择第一集
+    auto_match_ambiguous_action = "skip",
     -- 自动加载播放文件同目录下同名的 xml 格式的弹幕文件
     autoload_local_danmaku = false,
     -- 播放结束时自动保存弹幕为xml文件

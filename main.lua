@@ -4,7 +4,8 @@
 -- 附加改动：已移除内置脚本自动更新/检查更新（check-update + modules/update.lua），
 -- 防止检查更新时被上游发行版覆盖本 fork 的修改；更新请手动拉取本仓库。
 -- 合并日期：2026-11-26
-VERSION = "2.2.0.2"
+-- 最后更新：2026-11-27
+VERSION = "2.2.0.3"
 
 mp.commandv('script-message', 'uosc_danmaku-version', VERSION)
 
@@ -473,6 +474,66 @@ local function clear_source()
 
     show_message("已重置当前视频所有弹幕源更改", 3)
     msg.verbose("已重置当前视频所有弹幕源更改")
+end
+
+-- 计算当前视频在历史记录中使用的目录 key。
+-- 必须与 write_history 的目录计算保持一致，否则会误判“没有匹配历史”。
+function get_history_directory(path)
+    path = path or mp.get_property("path")
+    if not path then return nil end
+    local dir = get_parent_directory(path)
+    if is_protocol(path) then
+        local title, season_num, episode_num = parse_title()
+        if title and episode_num then
+            if season_num then
+                dir = title .. " Season" .. season_num
+            else
+                dir = title
+            end
+        end
+    end
+    return dir
+end
+
+-- 当前视频所在目录是否已经存在匹配历史。
+function has_folder_history(path)
+    local dir = get_history_directory(path)
+    if not dir then return false end
+    local history_json = read_file(HISTORY_PATH)
+    if not history_json then return false end
+    local history = utils.parse_json(history_json) or {}
+    return history[dir] ~= nil
+end
+
+-- 自动匹配时，标题没有明确集数且目录没有匹配历史，才需要用户确认集数。
+function auto_match_episode_unknown()
+    if not AUTO_MATCHING then return false end
+    local _, _, episode_num = parse_title()
+    if episode_num then return false end
+    return not has_folder_history()
+end
+
+function get_auto_match_ambiguous_action()
+    local action = tostring(options.auto_match_ambiguous_action or "skip"):lower()
+    if action == "menu" or action == "first" then
+        return action
+    end
+    return "skip"
+end
+
+-- 自动匹配到剧集但无法确定集数时的统一结束提示。
+function finish_auto_match_ambiguous()
+    if not AUTO_MATCHING then return end
+    FALLBACK_TRIGGER = true
+    AUTO_MATCHING_STAGE = "failed"
+    show_message("无法确定集数，请手动选择剧集", 3)
+    msg.info("自动匹配到剧集但无法确定集数，已跳过加载")
+end
+
+-- 进入“手动选集”状态，后续菜单操作按手动流程处理。
+function enter_auto_match_episode_menu()
+    AUTO_MATCHING = false
+    AUTO_MATCHING_STAGE = "idle"
 end
 
 function write_history(episodeid, api_server)
@@ -1219,11 +1280,6 @@ mp.register_script_message("auto_load_fallback", function()
     end
     show_message("自动匹配未找到弹幕", 3)
     msg.info("自动加载弹幕失败")
-
-    if options.auto_fallback_search then
-        msg.info("自动加载弹幕失败，自动弹出搜索框")
-        mp.commandv("script-message", "open_search_danmaku_menu")
-    end
 end)
 
 mp.register_script_message("clear-source", clear_source)

@@ -295,7 +295,9 @@ local function get_episodes_v2(cat, id, site)
     return episodes
 end
 
-function get_details(class, id, site, title, year, number, episodenum, auto_select_first)
+function get_details(class, id, site, title, year, number, episodenum, auto_select_first, ambiguous_action)
+    local show_menu = (not auto_select_first) or ambiguous_action == "menu"
+
     local function report_auto_failure()
         if auto_select_first and AUTO_MATCHING then
             mp.commandv("script-message", "auto_load_fallback")
@@ -392,13 +394,21 @@ function get_details(class, id, site, title, year, number, episodenum, auto_sele
             end
         end
 
-        -- 自动匹配不能把后台搜索流程切换成手动选集；没有明确集数时直接取第一集。
-        -- 若解析出的集数在站点返回列表中不存在，也使用第一集作为可用回退。
+        -- 自动匹配不能把后台搜索流程切换成手动选集；没有明确集数时按歧义策略处理。
+        -- 单集剧集没有选集歧义，仍然直接加载；有明确集数但站点不存在时也使用第一集兜底。
         if auto_select_first then
-            local first_episode = episode_rows[1]
-            if first_episode then
-                load_extra_danmaku(first_episode.url, first_episode.index, number, class, id, site, title, year)
+            local series_with_multiple_episodes = (cat == 2 or cat == 4) and #episode_rows > 1
+            if ambiguous_action == "skip" and series_with_multiple_episodes then
+                finish_auto_match_ambiguous()
                 return
+            end
+            local use_menu = ambiguous_action == "menu" and series_with_multiple_episodes
+            if not use_menu then
+                local first_episode = episode_rows[1]
+                if first_episode then
+                    load_extra_danmaku(first_episode.url, first_episode.index, number, class, id, site, title, year)
+                    return
+                end
             end
         end
 
@@ -423,9 +433,9 @@ function get_details(class, id, site, title, year, number, episodenum, auto_sele
         end
     end
     if #items > 0 then
-        if uosc_available and not episodenum and not auto_select_first then
+        if uosc_available and not episodenum and show_menu then
             update_menu_uosc(menu_type, menu_title, items, footnote)
-        elseif not episodenum then
+        elseif not episodenum and show_menu then
             show_message("", 0)
             mp.add_timeout(0.1, function()
                 open_menu_select(items)
@@ -633,7 +643,7 @@ function get_extra_search_items_async(name, class, callback)
     query_tmdb_async(name, "tv", function(value) tv_title = value; tmdb_done() end)
 end
 
-mp.register_script_message("get-extra-event", function(cat, id, playlink, source_id, title, year, auto_matching, auto_episode_num)
+mp.register_script_message("get-extra-event", function(cat, id, playlink, source_id, title, year, auto_matching, auto_episode_num, ambiguous_action)
     -- 后台自动匹配会传入第 7 个参数，保留自动流程的状态；普通菜单
     -- 点击没有该参数，仍按手动操作处理。
     local is_auto = auto_matching == true or tostring(auto_matching):lower() == "true"
@@ -656,7 +666,12 @@ mp.register_script_message("get-extra-event", function(cat, id, playlink, source
         end
     else
         local episode_num = auto_episode_num and auto_episode_num ~= "" and auto_episode_num or nil
-        get_details(cat, id, source_id, title, year, nil, episode_num, is_auto)
+        local resolved_action = is_auto and ambiguous_action and ambiguous_action ~= ""
+            and ambiguous_action or nil
+        if resolved_action == "menu" then
+            enter_auto_match_episode_menu()
+        end
+        get_details(cat, id, source_id, title, year, nil, episode_num, is_auto, resolved_action)
     end
 end)
 

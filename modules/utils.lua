@@ -879,6 +879,97 @@ function get_title_search_candidates(title)
     return candidates
 end
 
+-- 清理文件名或媒体标题：去掉常见扩展名、标签和分隔符。
+local function clean_media_title(value)
+    local title = normalize_title_whitespace(tostring(value or ""))
+    if title == "" then return "" end
+    title = title:gsub("%.(%w+)$", function(ext)
+        local lower = ext:lower()
+        local media_extensions = {
+            mp4 = true, mkv = true, avi = true, iso = true, m2ts = true, mts = true,
+            vob = true, webm = true, mov = true, flv = true, wmv = true, ts = true,
+            m4v = true, rmvb = true, mpg = true, mpeg = true, ifo = true, bdmv = true,
+        }
+        if media_extensions[lower] then return "" end
+        return "." .. ext
+    end)
+    return title
+        :gsub("%[.-%]", "")
+        :gsub("[%._]", " ")
+        :gsub("%s+", " ")
+        :gsub("^%s*(.-)%s*$", "%1")
+end
+
+local function has_meaningful_title(value)
+    local meaningful = tostring(value or ""):gsub("[%d%p%s]", "")
+    return #meaningful >= 2
+end
+
+-- BDMV、VIDEO_TS、STREAM 等目录结构里的通用文件名不能当作标题。
+local function is_generic_media_name(value)
+    local title = tostring(value or ""):lower()
+    local compact = title:gsub("[%s_%-%.]+", "")
+    local generic = {
+        index = true, bdmv = true, videots = true, video = true,
+        movie = true, movies = true, stream = true, streams = true,
+        main = true, title = true, playlist = true, playall = true,
+        sample = true, trailer = true, vts = true, vob = true,
+        m2ts = true, mts = true, ifo = true,
+    }
+    if generic[compact] then return true end
+    if title:match("^vts[%s_%-]?%d+[%s_%-]?%d+$") then return true end
+    if title:match("^b%d+[%s_%-]?t%d+$") then return true end
+    if compact:match("^%d+$") then return true end
+    return false
+end
+
+-- 只有真正的光盘结构目录或常见媒体库目录才需要继续向上查找标题。
+local function is_generic_disc_directory(value)
+    local compact = tostring(value or ""):lower():gsub("[%s_%-%.]+", "")
+    local generic = {
+        bdmv = true, videots = true, stream = true, streams = true,
+        video = true, videos = true, movie = true, movies = true,
+        media = true, downloads = true, download = true, iso = true,
+        bluray = true, bd = true, dvd = true,
+        ["视频"] = true, ["电影"] = true, ["影片"] = true,
+        ["下载"] = true, ["原盘"] = true, ["蓝光"] = true,
+    }
+    return generic[compact] == true
+end
+
+local function first_bracketed_title(value)
+    local text = tostring(value or "")
+    return text:match("^%s*%[([^%]]+)%]")
+        or text:match("^%s*【([^】]+)】")
+        or text:match("^%s*%(%s*([^%)]+)%)%s*$")
+end
+
+-- 从父目录开始向上查找，跳过光盘结构和常见媒体库目录。
+local function get_parent_directory_title(path)
+    local directory = get_parent_directory(path)
+    if not directory then return "" end
+    local dir, title = utils.split_path(directory:sub(1, -2))
+    local guard = 0
+    while title and guard < 6 do
+        local lower = title:lower()
+        local skip = is_generic_disc_directory(title)
+            or lower:match("^%s*seasons?%s*%d+%s*$")
+            or lower:match("^%s*specials?%s*$")
+            or title:match("^%s*SPs?%s*$")
+            or title:match("^%s*O[VAD]+s?%s*$")
+            or title:match("^%s*第.-[季部]+%s*$")
+        if not skip then break end
+        if not dir or #dir < 2 then break end
+        local next_dir, next_title = utils.split_path(dir:sub(1, -2))
+        -- 不把盘符根目录当作标题；找不到真正的标题目录时保留上一层结果。
+        if not next_title or next_title == "" or next_title:match("^%a:[/\\]?$") then break end
+        directory, title = next_dir, next_title
+        dir = directory
+        guard = guard + 1
+    end
+    return clean_media_title(title)
+end
+
 -- 获取播放文件标题信息
 function parse_title()
     local path = mp.get_property("path")
@@ -894,31 +985,73 @@ function parse_title()
     end
 
     if path and not protocol_path then
-        local title = format_filename(filename)
-        if title then
-            local media_title, season, episode = title:match("^(.-)%s*[sS](%d+)[eE](%d+)")
+        local lower_path = path:lower()
+        local is_disc_image = lower_path:match("%.iso$") ~= nil
+        local is_disc_structure = lower_path:find("[/\\]bdmv[/\\]", 1, true) ~= nil
+            or lower_path:find("[/\\]video_ts[/\\]", 1, true) ~= nil
+        local is_disc_media = is_disc_image or is_disc_structure
+        local disc_title = clean_media_title(mp.get_property("media-title"))
+        local folder_title = get_parent_directory_title(path)
+        local formatted = format_filename(filename)
+
+        local function formatted_with_episode()
+            if not formatted then return nil end
+            local parsed_title, season, episode = formatted:match("^(.-)%s*[sS](%d+)[eE](%d+)")
+            if not season then
+                parsed_title, episode = formatted:match("^(.-)%s*[eE](%d+)")
+            end
+            if episode then
+                return title_replace(parsed_title), season, episode
+            end
+            return nil
+        end
+
+        -- BD/DVD/ISO 优先使用光盘标题；文件名带明确集数时仍保留文件名。
+        -- 原盘文件名常常是一长串方括号标签，此时依次尝试光盘标题、所处目录、
+        -- 文件名开头的方括号标题，避免把整串发布标签当成作品名。
+        if is_disc_media then
+            local episode_title, episode_season, episode_number = formatted_with_episode()
+            if episode_title then
+                return episode_title, episode_season, episode_number
+            end
+            if has_meaningful_title(disc_title) and not is_generic_media_name(disc_title) then
+                return title_replace(disc_title)
+            end
+            if has_meaningful_title(folder_title) and not is_generic_media_name(folder_title) then
+                return title_replace(folder_title)
+            end
+            local bracket_title = clean_media_title(first_bracketed_title(filename))
+            if has_meaningful_title(bracket_title) and not is_generic_media_name(bracket_title) then
+                return title_replace(bracket_title)
+            end
+        end
+
+        if formatted then
+            local media_title, season, episode = formatted:match("^(.-)%s*[sS](%d+)[eE](%d+)")
             if season then
                 return title_replace(media_title), season, episode
             else
-                media_title, episode = title:match("^(.-)%s*[eE](%d+)")
+                media_title, episode = formatted:match("^(.-)%s*[eE](%d+)")
                 if episode then
                     return title_replace(media_title), season, episode
                 end
             end
-            return title_replace(title)
+            return title_replace(formatted)
         end
 
-        local directory = get_parent_directory(path)
-        local dir, title = utils.split_path(directory:sub(1, -2))
-        if title:lower():match("^%s*seasons?%s*%d+%s*$") or title:lower():match("^%s*specials?%s*$") or title:match("^%s*SPs?%s*$")
-        or title:match("^%s*O[VAD]+s?%s*$") or title:match("^%s*第.-[季部]+%s*$") then
-            directory, title = utils.split_path(dir:sub(1, -2))
+        -- format_filename 没有识别出结构时，优先使用有意义的文件名；
+        -- BDMV/VIDEO_TS 结构里的 index.bdmv、VTS_01_1.VOB、00001.m2ts 等
+        -- 通用名称不能当标题，此时改用媒体标题或真正的父目录名。
+        local filename_title = clean_media_title(filename)
+        if has_meaningful_title(filename_title) and not is_generic_media_name(filename_title) then
+            return title_replace(filename_title)
         end
-        title = normalize_title_whitespace(title)
-                :gsub("%[.-%]", "")
-                :gsub("[%._]", " ")
-                :gsub("^%s*(.-)%s*$", "%1")
-        return title_replace(title)
+
+        if has_meaningful_title(disc_title) and not is_generic_media_name(disc_title) then
+            return title_replace(disc_title)
+        end
+
+        return title_replace(folder_title)
     end
 
     local media_title = mp.get_property("media-title")
