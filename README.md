@@ -926,7 +926,7 @@ vf_fps_dolby_vision_hdr10
 
 部分 Dolby Vision 片源启用 `fps` 滤镜后，mpv 会在 Dolby Vision 与 HDR10 的色彩参数之间反复切换，导致画面闪烁、弹幕移动不连续。
 
-此选项默认关闭。开启并使用 `vf_fps=yes` 时，插件会根据实际视频参数识别 Dolby Vision。符合 HDR10 兼容条件时，插件固定使用 HDR10 输出，并保留 `fps` 滤镜（默认约 59.94 fps）。**播放将使用 HDR10，Dolby Vision 动态元数据不会生效。** 检测到 Dolby Vision 但无法确认 HDR10 兼容时，插件会跳过自己的 `fps` 滤镜。
+此选项默认开启，可设为 `vf_fps_dolby_vision_hdr10=no` 关闭。使用 `vf_fps=yes` 时，插件会根据实际视频参数识别 Dolby Vision。符合 HDR10 兼容条件时，插件固定使用 HDR10 输出，并保留 `fps` 滤镜（默认约 59.94 fps）。**播放将使用 HDR10，Dolby Vision 动态元数据不会生效。** 检测到 Dolby Vision 但无法确认 HDR10 兼容时，插件会跳过自己的 `fps` 滤镜。
 
 开启 `vf_fps_keep=yes` 时，HDR10 切换会随滤镜提前到影片启动阶段，在隐藏弹幕期间也会持续。关闭保留模式时，显示和隐藏弹幕会分别加入和移除两个滤镜。
 
