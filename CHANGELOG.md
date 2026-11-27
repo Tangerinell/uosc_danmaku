@@ -3,6 +3,11 @@
 本仓库是 [Tony15246/uosc_danmaku](https://github.com/Tony15246/uosc_danmaku) 的 fork。
 版本号沿用 `main.lua` 中的 `VERSION`，格式为 `上游版本.修订号`。
 
+## [2.2.0.4] - 2026-11-28
+
+- `vf_fps_keep` 在启播阶段配置滤镜，避免首次显示弹幕时重建视频滤镜链造成短暂停顿。
+- 新增默认关闭的 `vf_fps_dolby_vision_hdr10`。有 HDR10 兼容层的 Dolby Vision 片源可固定以 HDR10 输出并保留高帧率弹幕，避免色彩参数反复切换造成闪烁。开启时会改用 HDR10，Dolby Vision 动态元数据不会生效。
+
 ## [2.2.0.3] - 2026-11-27
 
 基于上游 `2.2.0`（`Tony15246/uosc_danmaku` @ `74ade6c`）同步后的首个发行版。

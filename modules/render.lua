@@ -219,15 +219,119 @@ function render_danmaku(from_menu, no_osd, manual_refresh)
     end
 end
 
-local function filter_state(label, name)
-    local filters = mp.get_property_native("vf")
-    for _, filter in pairs(filters) do
-        if filter.label == label or filter.name == name
-        or filter.params[name] ~= nil then
-            return true
+local function existing_fps_filter(filters)
+    for _, filter in ipairs(filters) do
+        if filter.label == "danmaku" or filter.name == "fps" or (filter.params and filter.params.fps) then
+            return filter
         end
     end
-    return false
+end
+
+local function set_video_filters(filters)
+    local ok, err = mp.set_property_native("vf", filters)
+    if not ok then
+        msg.warn("无法更新弹幕视频滤镜：" .. tostring(err))
+    end
+end
+
+local function remove_danmaku_filters()
+    local filters = mp.get_property_native("vf", {})
+    local changed = false
+    for i = #filters, 1, -1 do
+        local label = filters[i].label
+        if label == "danmaku" or label == "danmaku-hdr10" then
+            table.remove(filters, i)
+            changed = true
+        end
+    end
+    if changed then
+        set_video_filters(filters)
+    end
+end
+
+local function enable_danmaku_fps()
+    if not options.vf_fps then return end
+
+    local track = mp.get_property_native('current-tracks/video')
+    if not track or track.image or track.albumart then return end
+
+    local display_fps = mp.get_property_number('display-fps')
+    local video_fps = mp.get_property_number('container-fps')
+    if (display_fps and display_fps < 58) or (video_fps and video_fps > 58) then return end
+
+    local filters = mp.get_property_native("vf", {})
+    local fps_filter = existing_fps_filter(filters)
+    if fps_filter and fps_filter.label ~= "danmaku" then return end
+
+    local use_hdr10 = false
+    if options.vf_fps_dolby_vision_hdr10 then
+        for _, filter in ipairs(filters) do
+            if filter.label == "danmaku-hdr10" then return end
+        end
+
+        local matrix = mp.get_property('video-out-params/colormatrix')
+        local profile = track["dolby-vision-profile"]
+        if not matrix and not profile then return end
+
+        if matrix == 'dolbyvision' or profile then
+            -- 只在解码器报告 PQ 和 BT.2020 非恒定亮度的底层画面时切换。
+            local base = mp.get_property_native('video-dec-params', {})
+            use_hdr10 = profile ~= 5 and base.gamma == 'pq' and base.colormatrix == 'bt.2020-ncl'
+            if not use_hdr10 then
+                if fps_filter then remove_danmaku_filters() end
+                return
+            end
+        end
+    end
+
+    if use_hdr10 then
+        local format_filter = {
+            name = "format", label = "danmaku-hdr10", enabled = true, params = {dolbyvision = "no"},
+        }
+        -- 将格式滤镜放在插件的 fps 滤镜之前，两者一起生效。
+        if fps_filter then
+            for i, filter in ipairs(filters) do
+                if filter == fps_filter then
+                    table.insert(filters, i, format_filter)
+                    break
+                end
+            end
+        else
+            filters[#filters + 1] = format_filter
+        end
+    end
+    if not fps_filter then
+        filters[#filters + 1] = {
+            name = "fps", label = "danmaku", enabled = true, params = {fps = tostring(options.fps)},
+        }
+    end
+    if use_hdr10 or not fps_filter then
+        set_video_filters(filters)
+    end
+end
+
+local file_loaded = false
+
+if options.vf_fps then
+    mp.register_event('file-loaded', function()
+        file_loaded = true
+        -- 保留模式在启播时准备滤镜，避免弹幕出现时重建视频滤镜链。
+        if options.vf_fps_keep then
+            enable_danmaku_fps()
+        end
+    end)
+
+    if options.vf_fps_dolby_vision_hdr10 then
+        mp.observe_property('video-out-params/colormatrix', 'string', function(_, matrix)
+            if not file_loaded or not matrix then return end
+
+            -- 有些原盘只在首帧输出后才能从画面参数识别出杜比视界。
+            local visible = HAS_DANMAKU and mp.get_property_bool(HAS_DANMAKU, false)
+            if options.vf_fps_keep or visible then
+                enable_danmaku_fps()
+            end
+        end)
+    end
 end
 
 function show_danmaku_func()
@@ -237,15 +341,8 @@ function show_danmaku_func()
     if not pause then
         start_time_observer()
     end
-    if options.vf_fps then
-        local display_fps = mp.get_property_number('display-fps')
-        local video_fps = mp.get_property_number('container-fps')
-        if (display_fps and display_fps < 58) or (video_fps and video_fps > 58) then
-            return
-        end
-        if not filter_state("danmaku", "fps") then
-            mp.commandv("vf", "append", string.format("@danmaku:fps=fps=%s", options.fps))
-        end
+    if not options.vf_fps_keep then
+        enable_danmaku_fps()
     end
 end
 
@@ -258,8 +355,8 @@ function hide_danmaku_func(preserve_visibility)
     overlay_low:remove()
     overlay_high:remove()
     -- 开启 vf_fps_keep 时播放期间保留 fps 滤镜，避免开关弹幕反复重建滤镜链。
-    if not options.vf_fps_keep and filter_state("danmaku") then
-        mp.commandv("vf", "remove", "@danmaku")
+    if not options.vf_fps_keep then
+        remove_danmaku_filters()
     end
 end
 
@@ -321,6 +418,7 @@ mp.register_event('playback-restart', function(event)
 end)
 
 mp.add_hook("on_unload", 50, function()
+    file_loaded = false
     if type(cancel_auto_matching_requests) == "function" then
         cancel_auto_matching_requests()
     end
@@ -331,9 +429,7 @@ mp.add_hook("on_unload", 50, function()
     overlay_low:remove()
     overlay_high:remove()
     mp.set_property_native(DELAY_PROPERTY, 0)
-    if filter_state("danmaku") then
-        mp.commandv("vf", "remove", "@danmaku")
-    end
+    remove_danmaku_filters()
 
     local files_to_remove = {
         file1 = utils.join_path(DANMAKU_PATH, "temp-" .. PID .. ".mp4"),
