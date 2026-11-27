@@ -4,7 +4,9 @@
 >
 > 上游基线：`Tony15246/uosc_danmaku` @ `74ade6c`。本次合并内容：搜索历史、屏蔽词菜单、`title_replace` 规则文件、搜索完成统计行、网络流历史加载顺序优化、`message_alignment` 选项拼写修正。
 >
-> 本 fork 仓库：https://github.com/Tangerinell/uosc_danmaku （暂无 releases，请直接克隆仓库或下载仓库 zip）
+> 本 fork 仓库：https://github.com/Tangerinell/uosc_danmaku
+>
+> 发行版下载：https://github.com/Tangerinell/uosc_danmaku/releases/latest （压缩包已内置 `uosc_danmaku/` 顶层目录，解压到 `scripts` 即可）
 >
 > 已移除内置的脚本自动更新/检查更新功能（`check-update`），避免被上游发行版覆盖本 fork 的修改。更新方式请手动拉取本仓库。
 
@@ -129,9 +131,10 @@
 └── scripts
 ```
 
-想要使用本插件，请将本插件完整地[下载](https://github.com/Tangerinell/uosc_danmaku)或者克隆到 `scripts`目录下即可使用，文件结构参阅下方
+想要使用本插件，请将本插件完整地[下载](https://github.com/Tangerinell/uosc_danmaku/releases/latest)或者克隆到 `scripts`目录下即可使用，文件结构参阅下方
 
-> 本 fork 暂未发布 releases，请克隆仓库或下载仓库 zip 后解压到 `scripts`目录：
+> 推荐从 [Releases](https://github.com/Tangerinell/uosc_danmaku/releases/latest) 下载最新版本压缩包，解压后得到 `uosc_danmaku` 文件夹，直接放入 `scripts` 目录即可；
+> 也可以克隆仓库跟随 `main` 分支（版本信息见 [CHANGELOG.md](CHANGELOG.md)）：
 >
 > ```
 > git clone https://github.com/Tangerinell/uosc_danmaku.git
@@ -139,8 +142,7 @@
 
 > [!IMPORTANT]
 > 
-> 1. scripts目录下放置本插件的文件夹名称必须为uosc_danmaku，否则必须参照uosc控件配置部分[修改uosc控件](#修改uosc控件可选)
-> 2. 记得给bin文件夹下的文件赋予可执行权限
+> scripts目录下放置本插件的文件夹名称必须为uosc_danmaku，否则必须参照uosc控件配置部分[修改uosc控件](#修改uosc控件可选)。当前版本已无 `bin` 目录，无需再设置文件可执行权限。
 
 <details>
 <summary>文件结构</summary>
@@ -170,6 +172,7 @@
     ├── sites
     ├── uosc_danmaku.conf
     ├── title_replace.example.json
+    ├── CHANGELOG.md
     └── README.md
 ```
 
