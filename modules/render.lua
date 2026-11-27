@@ -239,7 +239,7 @@ function show_danmaku_func()
     end
     if options.vf_fps then
         local display_fps = mp.get_property_number('display-fps')
-        local video_fps = mp.get_property_number('estimated-vf-fps')
+        local video_fps = mp.get_property_number('container-fps')
         if (display_fps and display_fps < 58) or (video_fps and video_fps > 58) then
             return
         end
@@ -257,7 +257,8 @@ function hide_danmaku_func(preserve_visibility)
     end
     overlay_low:remove()
     overlay_high:remove()
-    if filter_state("danmaku") then
+    -- 开启 vf_fps_keep 时播放期间保留 fps 滤镜，避免开关弹幕反复重建滤镜链。
+    if not options.vf_fps_keep and filter_state("danmaku") then
         mp.commandv("vf", "remove", "@danmaku")
     end
 end
