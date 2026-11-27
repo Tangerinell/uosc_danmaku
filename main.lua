@@ -5,7 +5,7 @@
 -- 防止检查更新时被上游发行版覆盖本 fork 的修改；更新请手动拉取本仓库。
 -- 合并日期：2026-11-26
 -- 最后更新：2026-11-28
-VERSION = "2.2.0.4"
+VERSION = "2.2.0.5"
 
 mp.commandv('script-message', 'uosc_danmaku-version', VERSION)
 
@@ -1127,6 +1127,33 @@ function init(path, allow_network)
     end
 end
 
+local pending_saved_danmaku_path
+local saved_danmaku_timer
+
+mp.register_event("playback-restart", function()
+    local path = pending_saved_danmaku_path
+    if not path then return end
+
+    pending_saved_danmaku_path = nil
+    -- 给启播时的视频输出和滤镜配置留出时间，再读取和转换本地缓存。
+    saved_danmaku_timer = mp.add_timeout(1, function()
+        saved_danmaku_timer = nil
+        if mp.get_property("path") ~= path or has_loaded_comments() then return end
+
+        if not load_saved_danmaku(path, mp.get_property("filename/no-ext")) then
+            start_auto_matching_for_current_file()
+        end
+    end)
+end)
+
+mp.add_hook("on_unload", 40, function()
+    pending_saved_danmaku_path = nil
+    if saved_danmaku_timer then
+        saved_danmaku_timer:kill()
+        saved_danmaku_timer = nil
+    end
+end)
+
 mp.register_event("file-loaded", function()
     local path = mp.get_property("path")
     local dir = get_parent_directory(path)
@@ -1135,7 +1162,6 @@ mp.register_event("file-loaded", function()
     local fps = mp.get_property_number("container-fps", 0)
     local saved_visibility = get_danmaku_visibility()
     local should_auto_match = auto_matching_enabled(path)
-    local should_load_saved_local = options.autoload_local_danmaku == true
 
     -- 开关状态是全局持久化设置，不随视频切换或 mpv 重启恢复为默认值。
     -- ENABLED 仅表示脚本允许继续加载/处理弹幕；是否显示由 saved_visibility 决定。
@@ -1158,9 +1184,7 @@ mp.register_event("file-loaded", function()
         end
     end
 
-    -- 纯本地操作先行（吸收上游 b6ba473 思路）：历史源记录与本地 XML 的
-    -- 读取不受帧率/轨道就绪检查影响，网络流（帧率/标题晚到）也能立即
-    -- 恢复历史关联与本地弹幕；下方帧率检查只用于控制联网匹配时机。
+    -- 先恢复历史源记录；本地 XML 优先于联网匹配，帧率只用于决定联网时机。
     read_danmaku_source_record(path)
 
     -- 纯音频（无视频轨或仅封面）不加载弹幕
@@ -1170,7 +1194,10 @@ mp.register_event("file-loaded", function()
 
     -- 本地 XML 查找不受自动匹配总开关影响；开关只控制后续联网搜索。
     -- 普通文件查同目录或指定目录，ISO、光盘和 URL 按保存目录查找。
-    if should_load_saved_local and load_saved_danmaku(path, filename) then
+    if find_saved_danmaku(path, filename) then
+        cancel_auto_match_retry()
+        auto_retry_active = false
+        pending_saved_danmaku_path = path
         return
     end
 
