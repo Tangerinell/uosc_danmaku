@@ -44,8 +44,8 @@ options = {
     vf_fps = false,
     -- 播放期间是否一直保留 fps 滤镜；开启后关闭弹幕不会重建视频滤镜链
     vf_fps_keep = false,
-    -- 允许有 HDR10 兼容层的杜比视界片源用 HDR10 输出并保留 fps 滤镜。
-    vf_fps_dolby_vision_hdr10 = true,
+    -- Dolby Vision 片源是否允许使用弹幕 fps 滤镜。
+    vf_fps_dolby_vision = false,
     -- 设置要使用的 fps 滤镜参数
     fps = "60/1.001",
     -- 指定合并重复弹幕的时间间隔的容差值，单位为秒。默认值: -1，表示禁用

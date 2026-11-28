@@ -1,6 +1,6 @@
 # uosc_danmaku
 
-> 当前分叉版本为 `2.2.0.5`，基于 2026-11-25 的上游版本，合并于 2026-11-26，更新于 2026-11-28。
+> 当前分叉版本为 `2.2.0.6`，基于 2026-11-25 的上游版本，合并于 2026-11-26，更新于 2026-11-28。
 >
 > 上游基线：`Tony15246/uosc_danmaku` @ `74ade6c`。本次合并内容：搜索历史、屏蔽词菜单、`title_replace` 规则文件、搜索完成统计行、网络流历史加载顺序优化、`message_alignment` 选项拼写修正。
 >
@@ -902,7 +902,7 @@ vf_fps_keep
 
 配合 `vf_fps=yes` 使用。开启后，插件在影片启动阶段配置滤镜，即使弹幕尚未加载或处于关闭状态。这样可避免首次显示弹幕或重新打开弹幕时重建视频滤镜链造成的短暂停顿。隐藏弹幕期间，滤镜仍有性能开销。
 
-关闭此选项后，插件在显示弹幕时加入滤镜，在隐藏弹幕时移除滤镜。配合下方的 Dolby Vision 兼容模式使用时，开启保留模式也会使符合条件的影片从启播阶段起按 HDR10 输出。
+关闭此选项后，插件在显示弹幕时加入滤镜，在隐藏弹幕时移除滤镜。Dolby Vision 片源是否启用滤镜由下方的选项控制。
 
 #### 使用方法
 
@@ -916,23 +916,20 @@ vf_fps_keep=yes
 
 <details>
 <summary>
-vf_fps_dolby_vision_hdr10
+vf_fps_dolby_vision
 
-> 对有 HDR10 兼容层的 Dolby Vision 片源保留高帧率弹幕
+> Dolby Vision 片源是否允许使用弹幕 fps 滤镜
 
 </summary>
 
-### vf_fps_dolby_vision_hdr10
+### vf_fps_dolby_vision
 
-部分 Dolby Vision 片源启用 `fps` 滤镜后，mpv 会在 Dolby Vision 与 HDR10 的色彩参数之间反复切换，导致画面闪烁、弹幕移动不连续。
+默认 `no`。检测到 Dolby Vision 时，插件跳过自己的 `fps` 滤镜，弹幕按原片帧率刷新。
 
-此选项默认开启，可设为 `vf_fps_dolby_vision_hdr10=no` 关闭。使用 `vf_fps=yes` 时，插件会根据实际视频参数识别 Dolby Vision。符合 HDR10 兼容条件时，插件固定使用 HDR10 输出，并保留 `fps` 滤镜（默认约 59.94 fps）。**播放将使用 HDR10，Dolby Vision 动态元数据不会生效。** 检测到 Dolby Vision 但无法确认 HDR10 兼容时，插件会跳过自己的 `fps` 滤镜。
-
-开启 `vf_fps_keep=yes` 时，HDR10 切换会随滤镜提前到影片启动阶段，在隐藏弹幕期间也会持续。关闭保留模式时，显示和隐藏弹幕会分别加入和移除两个滤镜。
+设为 `yes` 时，Dolby Vision 片源按 `vf_fps` 和 `vf_fps_keep` 配置使用滤镜。部分片源启用后可能出现偏色、闪烁或短暂停顿。
 
 ```ini
-vf_fps=yes
-vf_fps_dolby_vision_hdr10=yes
+vf_fps_dolby_vision=no
 ```
 
 </details>

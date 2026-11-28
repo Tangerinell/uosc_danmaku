@@ -5,7 +5,7 @@
 -- 防止检查更新时被上游发行版覆盖本 fork 的修改；更新请手动拉取本仓库。
 -- 合并日期：2026-11-26
 -- 最后更新：2026-11-28
-VERSION = "2.2.0.5"
+VERSION = "2.2.0.6"
 
 mp.commandv('script-message', 'uosc_danmaku-version', VERSION)
 

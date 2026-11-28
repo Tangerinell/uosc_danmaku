@@ -239,7 +239,7 @@ local function remove_danmaku_filters()
     local changed = false
     for i = #filters, 1, -1 do
         local label = filters[i].label
-        if label == "danmaku" or label == "danmaku-hdr10" then
+        if label == "danmaku" then
             table.remove(filters, i)
             changed = true
         end
@@ -248,6 +248,8 @@ local function remove_danmaku_filters()
         set_video_filters(filters)
     end
 end
+
+local dolby_vision_seen = false
 
 local function enable_danmaku_fps()
     if not options.vf_fps then return end
@@ -259,55 +261,25 @@ local function enable_danmaku_fps()
     local video_fps = mp.get_property_number('container-fps')
     if (display_fps and display_fps < 58) or (video_fps and video_fps > 58) then return end
 
-    local filters = mp.get_property_native("vf", {})
-    local fps_filter = existing_fps_filter(filters)
-    if fps_filter and fps_filter.label ~= "danmaku" then return end
-
-    local use_hdr10 = false
-    if options.vf_fps_dolby_vision_hdr10 then
-        for _, filter in ipairs(filters) do
-            if filter.label == "danmaku-hdr10" then return end
-        end
-
+    if not options.vf_fps_dolby_vision then
         local matrix = mp.get_property('video-out-params/colormatrix')
-        local profile = track["dolby-vision-profile"]
-        if not matrix and not profile then return end
-
-        if matrix == 'dolbyvision' or profile then
-            -- 只在解码器报告 PQ 和 BT.2020 非恒定亮度的底层画面时切换。
-            local base = mp.get_property_native('video-dec-params', {})
-            use_hdr10 = profile ~= 5 and base.gamma == 'pq' and base.colormatrix == 'bt.2020-ncl'
-            if not use_hdr10 then
-                if fps_filter then remove_danmaku_filters() end
-                return
-            end
+        dolby_vision_seen = dolby_vision_seen or matrix == 'dolbyvision' or
+            track["dolby-vision-profile"] ~= nil
+        if dolby_vision_seen then
+            remove_danmaku_filters()
+            return
         end
+        -- 原盘可能要等到首帧才能识别 Dolby Vision。
+        if not matrix then return end
     end
 
-    if use_hdr10 then
-        local format_filter = {
-            name = "format", label = "danmaku-hdr10", enabled = true, params = {dolbyvision = "no"},
-        }
-        -- 将格式滤镜放在插件的 fps 滤镜之前，两者一起生效。
-        if fps_filter then
-            for i, filter in ipairs(filters) do
-                if filter == fps_filter then
-                    table.insert(filters, i, format_filter)
-                    break
-                end
-            end
-        else
-            filters[#filters + 1] = format_filter
-        end
-    end
-    if not fps_filter then
-        filters[#filters + 1] = {
-            name = "fps", label = "danmaku", enabled = true, params = {fps = tostring(options.fps)},
-        }
-    end
-    if use_hdr10 or not fps_filter then
-        set_video_filters(filters)
-    end
+    local filters = mp.get_property_native("vf", {})
+    if existing_fps_filter(filters) then return end
+
+    filters[#filters + 1] = {
+        name = "fps", label = "danmaku", enabled = true, params = {fps = tostring(options.fps)},
+    }
+    set_video_filters(filters)
 end
 
 local file_loaded = false
@@ -321,11 +293,16 @@ if options.vf_fps then
         end
     end)
 
-    if options.vf_fps_dolby_vision_hdr10 then
+    if not options.vf_fps_dolby_vision then
         mp.observe_property('video-out-params/colormatrix', 'string', function(_, matrix)
             if not file_loaded or not matrix then return end
 
-            -- 有些原盘只在首帧输出后才能从画面参数识别出杜比视界。
+            if matrix == 'dolbyvision' then
+                dolby_vision_seen = true
+                remove_danmaku_filters()
+                return
+            end
+
             local visible = HAS_DANMAKU and mp.get_property_bool(HAS_DANMAKU, false)
             if options.vf_fps_keep or visible then
                 enable_danmaku_fps()
@@ -419,6 +396,7 @@ end)
 
 mp.add_hook("on_unload", 50, function()
     file_loaded = false
+    dolby_vision_seen = false
     if type(cancel_auto_matching_requests) == "function" then
         cancel_auto_matching_requests()
     end
